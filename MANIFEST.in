@@ -1,0 +1,2 @@
+global-include *.sql
+recursive-include microscope_toolbox/static *

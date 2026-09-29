@@ -1,0 +1,7 @@
+# Packages that are required by pip
+python==3.10.18 # Match UV_PYTHON in Makefile if changed
+pip==22.0.4
+setuptools==62.3.2
+wheel==0.37.1
+# Note, if changed update buildspec.yml as well
+uv==0.9.5

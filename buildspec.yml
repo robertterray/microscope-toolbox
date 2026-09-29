@@ -1,0 +1,99 @@
+version: 0.2
+env:
+  shell: "bash"
+  exported-variables:
+  - CODEBUILD_WEBHOOK_TRIGGER
+  - CODEBUILD_WEBHOOK_HEAD_REF
+  - CODEBUILD_WEBHOOK_EVENT
+  - ECR_TAGS
+  - CODEARTIFACT_TAGS
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+    commands:
+    - |
+      if [ -n "${dockerhub_username}" ]; then
+          docker login -u $dockerhub_username -p $dockerhub_password
+      fi
+  pre_build:
+    commands:
+    - echo "CODEBUILD_SOURCE_VERSION ${CODEBUILD_SOURCE_VERSION}"
+    - echo "CODEBUILD_WEBHOOK_TRIGGER ${CODEBUILD_WEBHOOK_TRIGGER}"
+    - echo "CODEBUILD_WEBHOOK_BASE_REF ${CODEBUILD_WEBHOOK_BASE_REF}"
+    - echo "CODEBUILD_WEBHOOK_HEAD_REF ${CODEBUILD_WEBHOOK_HEAD_REF}"
+    - |
+      if expr "${CODEBUILD_WEBHOOK_TRIGGER}" : "^tag/.*"; then
+          RELEASE_TAG=${CODEBUILD_WEBHOOK_TRIGGER:4}
+          echo "Found release tag ${RELEASE_TAG}"
+          CODEBUILD_PREFIX="releases/${RELEASE_TAG}"
+      elif expr "${CODEBUILD_WEBHOOK_TRIGGER}" : "^pr/.*"; then
+          PR_NUM=${CODEBUILD_WEBHOOK_TRIGGER:3}
+          echo "Found pull request # ${PR_NUM}"
+          CODEBUILD_PREFIX="dev/${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+      else
+          echo "Not a release or a pull request"
+          CODEBUILD_PREFIX="dev/${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+      fi
+    - |
+      if expr "${CODEBUILD_WEBHOOK_EVENT}" : ".*MERGED"; then
+          echo "This is a merge into main"
+      fi
+    - echo "${CODEBUILD_PREFIX}"
+    - echo "Installing UV"
+    - wget -qO- https://astral.sh/uv/0.9.5/install.sh | sh
+    - source $HOME/.local/bin/env
+    - hash -r
+    - echo "Setting up build environment"
+    - make pip_setup_env_build
+    - source .venv/bin/activate
+    - echo "Linting and testing"
+    - make lint
+    - make test
+  build:
+    commands:
+    - |
+      if [ -n "${dockerhub_username}" ]; then
+          make build_docker
+      fi
+    - make dist
+  post_build:
+    commands:
+    - echo "Entering stage in which we would publish to ECR if appropriate"
+    - ECR_TAGS=""
+    - |
+      if [ -n "${dockerhub_username}" ] && [ -n "${RELEASE_TAG}" ]; then
+          echo "Uploading release ${RELEASE_TAG} to ECR"
+          make ECR_TAG=${RELEASE_TAG} publish_docker_ecr
+          ECR_TAGS+="${RELEASE_TAG},"
+          echo "Also tagging as 'production' in ECR"
+          make ECR_TAG=production publish_docker_ecr
+          ECR_TAGS+="production,"
+      fi
+    - |
+      if [ -n "${dockerhub_username}" ] && [ -n "${PR_NUM}" ]; then
+          echo "Uploading pull request ${PR_NUM} to ECR"
+          make ECR_TAG=pr${PR_NUM} publish_docker_ecr
+          ECR_TAGS+="pr${PR_NUM},"
+      fi
+    - |
+      if [ -n "${dockerhub_username}" ] && expr "${CODEBUILD_WEBHOOK_EVENT}" : ".*MERGED"; then
+          echo "Merge into master; tagging as 'latest'"
+          make ECR_TAG=latest publish_docker_ecr
+          ECR_TAGS+="latest,"
+      fi
+    - echo "Now handling code artifact"
+    - CODEARTIFACT_TAGS=""
+    - |
+      if [ -n "${RELEASE_TAG}" ]; then
+          echo "Uploading to code artifact"
+          make publish
+          CODEARTIFACT_TAGS+="${RELEASE_TAG},"
+      else
+          echo "Not a release tag, will not publish"
+      fi
+artifacts:
+  files:
+  - dist/microscope_toolbox-*.tar.gz
+  s3-prefix: microscope_toolbox/${CODEBUILD_PREFIX}
+  discard-paths: yes
