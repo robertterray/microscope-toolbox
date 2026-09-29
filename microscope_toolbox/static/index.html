@@ -37,6 +37,25 @@
             <div id="create-item-alert-title" class="fw-semibold"></div>
             <pre id="create-item-alert-body" class="mb-0 mt-2 small"></pre>
         </div>
+
+        <div class="card shadow-sm mt-4">
+            <div class="card-body">
+                <h2 class="h4 card-title mb-3">Run Notebook</h2>
+                <button id="run-notebook-button" type="button" class="btn btn-primary">
+                    <span id="run-notebook-spinner" class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+                    Run
+                </button>
+                <div id="notebook-run-alert" class="alert mt-3 mb-0 d-none" role="alert">
+                    <div id="notebook-run-alert-title" class="fw-semibold"></div>
+                    <pre id="notebook-run-alert-body" class="mb-0 mt-2 small text-wrap"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid pb-5 d-none" id="executed-notebook-panel">
+        <!-- Sandboxed without allow-same-origin so the notebook's own CSS and scripts can't touch this page. -->
+        <iframe id="executed-notebook" class="w-100 border rounded bg-white" style="height: 80vh;" sandbox="allow-scripts" title="Executed notebook"></iframe>
     </div>
 
     <script>
@@ -107,6 +126,50 @@
 
         refreshDowndetectorStatus();
         setInterval(refreshDowndetectorStatus, STATUS_REFRESH_INTERVAL_MS);
+
+        const runNotebookButton = document.getElementById("run-notebook-button");
+        const runNotebookSpinner = document.getElementById("run-notebook-spinner");
+        const notebookRunAlert = document.getElementById("notebook-run-alert");
+        const notebookRunAlertTitle = document.getElementById("notebook-run-alert-title");
+        const notebookRunAlertBody = document.getElementById("notebook-run-alert-body");
+        const executedNotebookPanel = document.getElementById("executed-notebook-panel");
+        const executedNotebook = document.getElementById("executed-notebook");
+
+        function showNotebookRunAlert(variant, title, message) {
+            notebookRunAlert.className = `alert alert-${variant} mt-3 mb-0`;
+            notebookRunAlertTitle.textContent = title;
+            notebookRunAlertBody.textContent = message;
+        }
+
+        function showExecutedNotebook(notebookHtml) {
+            executedNotebook.srcdoc = notebookHtml;
+            executedNotebookPanel.classList.remove("d-none");
+        }
+
+        runNotebookButton.addEventListener("click", async () => {
+            runNotebookButton.disabled = true;
+            runNotebookSpinner.classList.remove("d-none");
+            showNotebookRunAlert("secondary", "Running…", "");
+            executedNotebookPanel.classList.add("d-none");
+            try {
+                const response = await fetch("/notebook-runs", { method: "POST" });
+                const notebookRun = await response.json();
+                if (!response.ok) {
+                    showNotebookRunAlert("danger", "Error " + response.status, notebookRun.detail ?? JSON.stringify(notebookRun));
+                } else if (notebookRun.succeeded) {
+                    showNotebookRunAlert("success", "Finished", notebookRun.executed_notebook_path);
+                    showExecutedNotebook(notebookRun.html);
+                } else {
+                    showNotebookRunAlert("danger", "A cell failed", notebookRun.error);
+                    showExecutedNotebook(notebookRun.html);
+                }
+            } catch (error) {
+                showNotebookRunAlert("danger", "Request failed", String(error));
+            } finally {
+                runNotebookButton.disabled = false;
+                runNotebookSpinner.classList.add("d-none");
+            }
+        });
     </script>
 </body>
 </html>
