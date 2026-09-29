@@ -46,7 +46,8 @@ clean-test: ## remove test and coverage artifacts
 	rm -fr .pytest_cache
 	rm -fr .mypy_cache
 
-lint: ## check style with black
+lint: ## check style with ruff and black
+	ruff check $(MODULE)/ tests/
 	black --check $(MODULE)/ tests/
 
 test: ## run tests quickly with the default Python
@@ -109,6 +110,7 @@ conda_setup_env_build:
 
 # Check code style inside the '{MODULE}' environment
 conda_lint:
+	conda run -n ${ENV_NAME} ruff check ${MODULE}/ tests/
 	conda run -n ${ENV_NAME} black --check ${MODULE}/ tests/
 
 # Run tests inside the '{MODULE}' environment

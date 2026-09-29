@@ -20,5 +20,4 @@ RUN --mount=type=secret,id=AUTH_TOKEN \
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-WORKDIR /app/scripts
 ENTRYPOINT ["uv", "run", "--no-sync"]

@@ -4,7 +4,7 @@ Microscope toolbox. Started from Terray's Python package template.
 
 ### Features
 
-* Directory structure with a main code directory, scripts/, and tests/
+* Directory structure with a main code directory and tests/
 * pyproject.toml-based modern Python packaging with setuptools
 * Dockerfile and Make recipes for Docker build and deployment
 * UV-based dependency management with Make recipes for conda+pip and pip-only environment management
@@ -64,6 +64,17 @@ make dist
 # Publish to CodeArtifact
 make publish
 ```
+
+### Web app
+
+The package includes a small FastAPI app (`microscope_toolbox/api.py`) with a stub items API, a
+downdetector.com status check, and a static page served at `/`.
+
+```bash
+uvicorn microscope_toolbox.api:app --reload
+```
+
+Then open http://127.0.0.1:8000 for the page, or http://127.0.0.1:8000/docs for the API docs.
 
 ### Internal dependencies
 

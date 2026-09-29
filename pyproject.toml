@@ -12,7 +12,6 @@ classifiers = ["Private :: Do Not Upload"]
 
 dependencies = [
     "requests>=2.25",
-    "pyyaml>=5.3",
     "fastapi>=0.100",
     "uvicorn>=0.23",
 ]
@@ -20,7 +19,6 @@ dependencies = [
 [project.optional-dependencies]
 pinned = [
     "requests==2.31.0",
-    "pyyaml==6.0",
     "fastapi==0.115.0",
     "uvicorn==0.30.6",
 ]
@@ -32,6 +30,9 @@ dev = [
     "pytest-cov==3.0.0",
     "mypy==0.950",
     "httpx==0.27.2",
+    "ruff==0.16.9",
+    # Later versions require urllib3 2.x; requirements.txt pins urllib3 1.26
+    "types-requests==2.31.0.6",
 ]
 
 [[tool.uv.index]]
@@ -45,6 +46,21 @@ packages = { find = { include = ["microscope_toolbox*"] } }
 
 [tool.setuptools.dynamic]
 version = {attr = "microscope_toolbox.__version__"}
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88  # match black
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, N pep8-naming, B bugbear, UP pyupgrade, SIM simplify
+select = ["E", "W", "F", "I", "N", "B", "UP", "SIM"]
+# E501: line length is black's job
+# UP006/UP035: keep typing.Dict/List/Optional per the convention in CLAUDE.md
+ignore = ["E501", "UP006", "UP035"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection defaults (Depends, Query, ...) are evaluated once by design
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
 
 [build-system]
 requires = ["setuptools >= 77.0.3"]

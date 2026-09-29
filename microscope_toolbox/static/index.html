@@ -8,10 +8,10 @@
 </head>
 <body class="bg-body-tertiary">
     <div class="container py-5" style="max-width: 540px;">
-        <div id="status" class="alert alert-secondary d-flex align-items-center gap-2 py-2 small" role="status">
-            <span id="status-badge" class="badge text-bg-secondary">…</span>
-            <span id="status-text">downdetector.com: checking…</span>
-            <span id="status-checked" class="ms-auto text-body-secondary"></span>
+        <div id="downdetector-status" class="alert alert-secondary d-flex align-items-center gap-2 py-2 small" role="status">
+            <span id="downdetector-status-badge" class="badge text-bg-secondary">…</span>
+            <span id="downdetector-status-text">downdetector.com: checking…</span>
+            <span id="downdetector-status-checked-at" class="ms-auto text-body-secondary"></span>
         </div>
 
         <div class="card shadow-sm">
@@ -33,77 +33,80 @@
             </div>
         </div>
 
-        <div id="result" class="alert mt-4 d-none" role="alert">
-            <div id="result-title" class="fw-semibold"></div>
-            <pre id="result-body" class="mb-0 mt-2 small"></pre>
+        <div id="create-item-alert" class="alert mt-4 d-none" role="alert">
+            <div id="create-item-alert-title" class="fw-semibold"></div>
+            <pre id="create-item-alert-body" class="mb-0 mt-2 small"></pre>
         </div>
     </div>
 
     <script>
         const form = document.getElementById("item-form");
-        const result = document.getElementById("result");
-        const resultTitle = document.getElementById("result-title");
-        const resultBody = document.getElementById("result-body");
+        const createItemAlert = document.getElementById("create-item-alert");
+        const createItemAlertTitle = document.getElementById("create-item-alert-title");
+        const createItemAlertBody = document.getElementById("create-item-alert-body");
 
-        function showResult(ok, title, body) {
-            result.className = "alert mt-4 " + (ok ? "alert-success" : "alert-danger");
-            resultTitle.textContent = title;
-            resultBody.textContent = body;
+        function showCreateItemAlert(succeeded, title, message) {
+            createItemAlert.className = "alert mt-4 " + (succeeded ? "alert-success" : "alert-danger");
+            createItemAlertTitle.textContent = title;
+            createItemAlertBody.textContent = message;
         }
 
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
             const description = form.description.value.trim();
-            const body = { name: form.name.value.trim(), description: description || null };
+            const newItem = { name: form.name.value.trim(), description: description || null };
 
             try {
                 const response = await fetch("/items", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
+                    body: JSON.stringify(newItem),
                 });
-                const data = await response.json();
-                const pretty = JSON.stringify(data, null, 2);
+                const responseJson = JSON.stringify(await response.json(), null, 2);
                 if (response.ok) {
-                    showResult(true, "Created", pretty);
+                    showCreateItemAlert(true, "Created", responseJson);
                     form.reset();
                 } else {
-                    showResult(false, "Error " + response.status, pretty);
+                    showCreateItemAlert(false, "Error " + response.status, responseJson);
                 }
-            } catch (err) {
-                showResult(false, "Request failed", String(err));
+            } catch (error) {
+                showCreateItemAlert(false, "Request failed", String(error));
             }
         });
 
-        const status = document.getElementById("status");
-        const statusBadge = document.getElementById("status-badge");
-        const statusText = document.getElementById("status-text");
-        const statusChecked = document.getElementById("status-checked");
+        const STATUS_REFRESH_INTERVAL_MS = 5000;
+        const downdetectorStatus = document.getElementById("downdetector-status");
+        const downdetectorStatusBadge = document.getElementById("downdetector-status-badge");
+        const downdetectorStatusText = document.getElementById("downdetector-status-text");
+        const downdetectorStatusCheckedAt = document.getElementById("downdetector-status-checked-at");
 
-        function setStatus(variant, badge, text) {
-            status.className = `alert alert-${variant} d-flex align-items-center gap-2 py-2 small`;
-            statusBadge.className = `badge text-bg-${variant}`;
-            statusBadge.textContent = badge;
-            statusText.textContent = text;
+        function showDowndetectorStatus(variant, badge, text) {
+            downdetectorStatus.className = `alert alert-${variant} d-flex align-items-center gap-2 py-2 small`;
+            downdetectorStatusBadge.className = `badge text-bg-${variant}`;
+            downdetectorStatusBadge.textContent = badge;
+            downdetectorStatusText.textContent = text;
         }
 
-        async function refreshStatus() {
+        async function refreshDowndetectorStatus() {
             try {
                 const response = await fetch("/status/downdetector");
-                const data = await response.json();
-                if (data.up) {
-                    setStatus("success", "UP", `downdetector.com (${data.status_code}, ${data.latency_ms} ms)`);
-                } else {
-                    setStatus("danger", "DOWN", `downdetector.com (${data.status_code ?? data.error})`);
+                if (!response.ok) {
+                    throw new Error("HTTP " + response.status);
                 }
-            } catch (err) {
-                setStatus("secondary", "?", "downdetector.com: status check failed");
+                const siteStatus = await response.json();
+                if (siteStatus.up) {
+                    showDowndetectorStatus("success", "UP", `downdetector.com (${siteStatus.status_code}, ${siteStatus.latency_ms} ms)`);
+                } else {
+                    showDowndetectorStatus("danger", "DOWN", `downdetector.com (${siteStatus.status_code ?? siteStatus.error})`);
+                }
+            } catch (error) {
+                showDowndetectorStatus("secondary", "?", "downdetector.com: status check failed");
             }
-            statusChecked.textContent = "checked " + new Date().toLocaleTimeString();
+            downdetectorStatusCheckedAt.textContent = "checked " + new Date().toLocaleTimeString();
         }
 
-        refreshStatus();
-        setInterval(refreshStatus, 5000);
+        refreshDowndetectorStatus();
+        setInterval(refreshDowndetectorStatus, STATUS_REFRESH_INTERVAL_MS);
     </script>
 </body>
 </html>

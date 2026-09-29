@@ -1,4 +1,5 @@
 """FastAPI application."""
+
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -10,16 +11,17 @@ from pydantic import BaseModel
 
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNDETECTOR_URL = "https://downdetector.com/"
+DOWNDETECTOR_TIMEOUT_SECONDS = 4
 
 app = FastAPI(title="microscope_toolbox")
 
 
-class Item(BaseModel):
+class NewItem(BaseModel):
     name: str
     description: Optional[str] = None
 
 
-class ItemResponse(BaseModel):
+class Item(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
@@ -38,35 +40,38 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/items/{item_id}", response_model=ItemResponse)
-def get_item(item_id: int) -> ItemResponse:
+@app.get("/items/{item_id}", response_model=Item)
+def get_item(item_id: int) -> Item:
     # TODO: replace stub with real lookup
     if item_id < 1:
         raise HTTPException(status_code=404, detail="Item not found")
-    return ItemResponse(id=item_id, name="stub")
+    return Item(id=item_id, name="stub")
 
 
-@app.post("/items", response_model=ItemResponse, status_code=201)
-def create_item(item: Item) -> ItemResponse:
+@app.post("/items", response_model=Item, status_code=201)
+def create_item(new_item: NewItem) -> Item:
     # TODO: replace stub with real persistence
-    return ItemResponse(id=1, name=item.name, description=item.description)
+    return Item(id=1, name=new_item.name, description=new_item.description)
 
 
 @app.get("/status/downdetector", response_model=SiteStatus)
-def downdetector_status() -> SiteStatus:
+def get_downdetector_status() -> SiteStatus:
     # Downdetector answers bots with 403, which still means the site is reachable,
     # so only 5xx responses and connection failures count as down.
-    start = time.monotonic()
+    request_started = time.monotonic()
     try:
-        r = requests.get(DOWNDETECTOR_URL, timeout=4, stream=True)
-        r.close()
-    except requests.RequestException as e:
-        return SiteStatus(url=DOWNDETECTOR_URL, up=False, error=type(e).__name__)
-    latency_ms = int((time.monotonic() - start) * 1000)
+        # stream=True returns once the headers arrive, without downloading the page.
+        response = requests.get(
+            DOWNDETECTOR_URL, timeout=DOWNDETECTOR_TIMEOUT_SECONDS, stream=True
+        )
+        response.close()
+    except requests.RequestException as error:
+        return SiteStatus(url=DOWNDETECTOR_URL, up=False, error=type(error).__name__)
+    latency_ms = int((time.monotonic() - request_started) * 1000)
     return SiteStatus(
         url=DOWNDETECTOR_URL,
-        up=r.status_code < 500,
-        status_code=r.status_code,
+        up=response.status_code < 500,
+        status_code=response.status_code,
         latency_ms=latency_ms,
     )
 
