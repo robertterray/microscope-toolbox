@@ -12,14 +12,20 @@ On top of that, this repo contains a small FastAPI web app:
   always returns `id=1`.
 - **Downdetector status**: the server checks whether downdetector.com is reachable and reports the
   result.
-- **Web page**: a single static page with a form to create items and a status bar for downdetector.com
-  that refreshes every 5 seconds.
+- **Notebook runs**: the server runs a notebook on a remote Jupyter Notebook 6 server (zeus2) in a
+  fresh kernel there, and returns the executed copy rendered as HTML.
+- **Web page**: a single static page with a form to create items, a button that runs the notebook and
+  shows its output, and a status bar for downdetector.com that refreshes every 5 seconds.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
 ## Layout
 
 - `microscope_toolbox/api.py`: FastAPI app, holding all routes and Pydantic models.
+- `microscope_toolbox/notebook_runs.py`: notebook run configuration, cell-by-cell execution, saving
+  and HTML rendering.
+- `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
+  contents API, sessions API and the kernel websocket.
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
   build step. `vendor/` holds a local copy of Bootstrap 5.3.3 CSS, so the page works offline.
 - `tests/`: pytest suite (`test_api.py`).
@@ -32,6 +38,7 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/items/{item_id}` | Stub; 404 when `item_id < 1` |
 | POST | `/items` | Stub create; returns 201 |
 | GET | `/status/downdetector` | Reachability of downdetector.com |
+| POST | `/notebook-runs` | Run the configured notebook (blocks); 201 even if a cell fails, 502 if the Jupyter server fails |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
@@ -90,5 +97,13 @@ A reader should be able to follow the code from its names alone, without comment
   extra (an exact version). Dev-only tools go in `dev`.
 - Downdetector blocks non-browser clients with a 403. That still means the site is reachable, so only
   5xx responses, timeouts and connection errors count as down.
-- Tests must not use the network. Mock `requests.get` via `monkeypatch`, as in `test_api.py`.
+- Notebook runs are configured by `MICROSCOPE_TOOLBOX_JUPYTER_URL`, `MICROSCOPE_TOOLBOX_JUPYTER_PASSWORD`
+  and `MICROSCOPE_TOOLBOX_NOTEBOOK_PATH` (relative to the Jupyter server's root, i.e. the part after
+  `/notebooks/` in its URL). Executed copies are saved locally in `MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR`
+  (default `notebook_runs/`, gitignored); the notebook on the server is never modified.
+- The kernel runs on the Jupyter server with the notebook's folder as working directory, so the
+  notebook uses the server's packages and data paths, not this venv's.
+- Tests must not use the network or start a Jupyter kernel. Mock `requests.get` and
+  `notebook_runs.JupyterServer` via `monkeypatch`, as in `test_api.py`; `test_remote_jupyter.py`
+  scripts kernel messages with a fake websocket.
 - New static files are packaged automatically via `MANIFEST.in` (`recursive-include ... static *`).

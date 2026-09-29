@@ -9,6 +9,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from microscope_toolbox import notebook_runs
+from microscope_toolbox.remote_jupyter import JupyterServerError
+
 STATIC_DIR = Path(__file__).parent / "static"
 DOWNDETECTOR_URL = "https://downdetector.com/"
 DOWNDETECTOR_TIMEOUT_SECONDS = 4
@@ -33,6 +36,14 @@ class SiteStatus(BaseModel):
     status_code: Optional[int] = None
     latency_ms: Optional[int] = None
     error: Optional[str] = None
+
+
+class NotebookRun(BaseModel):
+    notebook_url: str
+    executed_notebook_path: str
+    succeeded: bool
+    error: Optional[str] = None
+    html: str
 
 
 @app.get("/health")
@@ -73,6 +84,33 @@ def get_downdetector_status() -> SiteStatus:
         up=response.status_code < 500,
         status_code=response.status_code,
         latency_ms=latency_ms,
+    )
+
+
+@app.post("/notebook-runs", response_model=NotebookRun, status_code=201)
+def create_notebook_run() -> NotebookRun:
+    """Run the configured notebook on its Jupyter server and return it as HTML.
+
+    Blocks until the notebook finishes. A failing cell still returns 201, with
+    `succeeded` false and the notebook rendered up to the failing cell.
+    """
+    try:
+        remote_notebook = notebook_runs.configured_remote_notebook()
+    except notebook_runs.NotebookRunNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    try:
+        executed_notebook = notebook_runs.execute_notebook(remote_notebook)
+    except (JupyterServerError, requests.RequestException) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    executed_notebook_path = notebook_runs.save_executed_notebook(
+        executed_notebook.notebook, remote_notebook.notebook_path
+    )
+    return NotebookRun(
+        notebook_url=remote_notebook.notebook_url,
+        executed_notebook_path=str(executed_notebook_path),
+        succeeded=executed_notebook.cell_error is None,
+        error=executed_notebook.cell_error,
+        html=notebook_runs.render_notebook_html(executed_notebook.notebook),
     )
 
 

@@ -104,3 +104,6 @@ ENV/
 
 # IDE settings
 .vscode/
+
+# Executed copies written by POST /notebook-runs
+notebook_runs/
