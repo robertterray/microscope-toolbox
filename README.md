@@ -67,8 +67,9 @@ make publish
 
 ### Web app
 
-The package includes a small FastAPI app (`microscope_toolbox/api.py`) with a stub items API, a
-downdetector.com status check, and a static page served at `/`.
+The package includes a small FastAPI app (`microscope_toolbox/api.py`) that runs an
+alignment QC notebook on a remote Jupyter server, and a static page served at `/` to select imaging
+runs and view the executed notebook.
 
 ```bash
 uvicorn microscope_toolbox.api:app --reload

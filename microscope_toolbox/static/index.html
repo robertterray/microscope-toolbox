@@ -3,44 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Create Item</title>
+    <title>Run Notebook</title>
     <link rel="stylesheet" href="/vendor/bootstrap-5.3.3.min.css">
 </head>
 <body class="bg-body-tertiary">
     <div class="container py-5" style="max-width: 540px;">
-        <div id="downdetector-status" class="alert alert-secondary d-flex align-items-center gap-2 py-2 small" role="status">
-            <span id="downdetector-status-badge" class="badge text-bg-secondary">…</span>
-            <span id="downdetector-status-text">downdetector.com: checking…</span>
-            <span id="downdetector-status-checked-at" class="ms-auto text-body-secondary"></span>
-        </div>
-
         <div class="card shadow-sm">
             <div class="card-body">
-                <h1 class="h3 card-title mb-4">Create Item</h1>
-                <form id="item-form">
-                    <div class="mb-3">
-                        <label for="name" class="form-label">Name</label>
-                        <input id="name" name="name" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="description" class="form-label">
-                            Description <span class="text-body-secondary">(optional)</span>
-                        </label>
-                        <textarea id="description" name="description" class="form-control" rows="3"></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Create</button>
-                </form>
-            </div>
-        </div>
-
-        <div id="create-item-alert" class="alert mt-4 d-none" role="alert">
-            <div id="create-item-alert-title" class="fw-semibold"></div>
-            <pre id="create-item-alert-body" class="mb-0 mt-2 small"></pre>
-        </div>
-
-        <div class="card shadow-sm mt-4">
-            <div class="card-body">
-                <h2 class="h4 card-title mb-3">Run Notebook</h2>
+                <h1 class="h3 card-title mb-3">Run Notebook</h1>
                 <form id="imaging-run-query-form">
                     <p class="text-body-secondary small">Select imaging runs. Leave a field empty to skip that restriction.</p>
                     <div class="mb-3">
@@ -88,74 +58,6 @@
     </div>
 
     <script>
-        const form = document.getElementById("item-form");
-        const createItemAlert = document.getElementById("create-item-alert");
-        const createItemAlertTitle = document.getElementById("create-item-alert-title");
-        const createItemAlertBody = document.getElementById("create-item-alert-body");
-
-        function showCreateItemAlert(succeeded, title, message) {
-            createItemAlert.className = "alert mt-4 " + (succeeded ? "alert-success" : "alert-danger");
-            createItemAlertTitle.textContent = title;
-            createItemAlertBody.textContent = message;
-        }
-
-        form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const description = form.description.value.trim();
-            const newItem = { name: form.name.value.trim(), description: description || null };
-
-            try {
-                const response = await fetch("/items", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(newItem),
-                });
-                const responseJson = JSON.stringify(await response.json(), null, 2);
-                if (response.ok) {
-                    showCreateItemAlert(true, "Created", responseJson);
-                    form.reset();
-                } else {
-                    showCreateItemAlert(false, "Error " + response.status, responseJson);
-                }
-            } catch (error) {
-                showCreateItemAlert(false, "Request failed", String(error));
-            }
-        });
-
-        const STATUS_REFRESH_INTERVAL_MS = 5000;
-        const downdetectorStatus = document.getElementById("downdetector-status");
-        const downdetectorStatusBadge = document.getElementById("downdetector-status-badge");
-        const downdetectorStatusText = document.getElementById("downdetector-status-text");
-        const downdetectorStatusCheckedAt = document.getElementById("downdetector-status-checked-at");
-
-        function showDowndetectorStatus(variant, badge, text) {
-            downdetectorStatus.className = `alert alert-${variant} d-flex align-items-center gap-2 py-2 small`;
-            downdetectorStatusBadge.className = `badge text-bg-${variant}`;
-            downdetectorStatusBadge.textContent = badge;
-            downdetectorStatusText.textContent = text;
-        }
-
-        async function refreshDowndetectorStatus() {
-            try {
-                const response = await fetch("/status/downdetector");
-                if (!response.ok) {
-                    throw new Error("HTTP " + response.status);
-                }
-                const siteStatus = await response.json();
-                if (siteStatus.up) {
-                    showDowndetectorStatus("success", "UP", `downdetector.com (${siteStatus.status_code}, ${siteStatus.latency_ms} ms)`);
-                } else {
-                    showDowndetectorStatus("danger", "DOWN", `downdetector.com (${siteStatus.status_code ?? siteStatus.error})`);
-                }
-            } catch (error) {
-                showDowndetectorStatus("secondary", "?", "downdetector.com: status check failed");
-            }
-            downdetectorStatusCheckedAt.textContent = "checked " + new Date().toLocaleTimeString();
-        }
-
-        refreshDowndetectorStatus();
-        setInterval(refreshDowndetectorStatus, STATUS_REFRESH_INTERVAL_MS);
-
         const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgid", "run_name_contains", "exp_type"];
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
         const DEFAULT_MICROSCOPE = "TigerS4";

@@ -8,16 +8,12 @@ AWS CodeBuild `buildspec.yml`. See `README.md` for build and publish details.
 
 On top of that, this repo contains a small FastAPI web app:
 
-- **Items API**: create and fetch items. Both endpoints are stubs with no storage yet; `POST /items`
-  always returns `id=1`.
-- **Downdetector status**: the server checks whether downdetector.com is reachable and reports the
-  result.
 - **Notebook runs**: the server runs a notebook on a remote Jupyter Notebook 6 server (zeus2) in a
   fresh kernel there, and returns the executed copy rendered as HTML. An optional imaging run query
   (run start date, microscope, LG number, run name, experiment type) replaces the notebook's
   `imaging_runs = exp.ImagingRuns * ...` cell before it runs.
-- **Web page**: a single static page with a form to create items, an imaging run query form that runs
-  the notebook and shows its output, and a status bar for downdetector.com that refreshes every 5 seconds.
+- **Web page**: a single static page with an imaging run query form that runs the notebook and shows
+  its output.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
@@ -39,9 +35,6 @@ On top of that, this repo contains a small FastAPI web app:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness check |
-| GET | `/items/{item_id}` | Stub; 404 when `item_id < 1` |
-| POST | `/items` | Stub create; returns 201 |
-| GET | `/status/downdetector` | Reachability of downdetector.com |
 | GET | `/microscopes` | Microscopes an imaging run query can restrict to |
 | GET | `/exp-types` | Experiment types an imaging run query can restrict to |
 | POST | `/notebook-runs` | Run the configured notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `imaging_runs` cell |
@@ -78,9 +71,10 @@ A reader should be able to follow the code from its names alone, without comment
   annotate a local variable when a reader can't tell its type from the right-hand side, for example
   `response.json()`, parsed YAML, or an empty container (`statuses: Dict[str, bool] = {}`).
 - **Don't state a type twice.** Skip the annotation when the right-hand side already shows the type:
-  write `item = Item(name=name)`, not `item: Item = Item(name=name)`.
+  write `query = ImagingRunQuery(microscope=microscope)`, not
+  `query: ImagingRunQuery = ImagingRunQuery(microscope=microscope)`.
 - **Comments explain why, not what.** Good reasons for a comment: a constraint that isn't obvious, a
-  workaround, or why the simpler approach fails. The downdetector 403 handling is one example. If a
+  workaround, or why the simpler approach fails. The `QueryText` pattern's comment is one example. If a
   comment only repeats the code in English, delete it and fix the names. When editing existing code,
   keep its why-comments; don't delete or duplicate them.
 - **Docstrings follow the same rule.** Add one only when the name and signature don't show why
@@ -101,22 +95,21 @@ A reader should be able to follow the code from its names alone, without comment
   bad names (e.g. `l`), but naming quality is still mostly on you (see Readability).
 - Add dependencies to `pyproject.toml` in both `dependencies` (a version range) and the `pinned`
   extra (an exact version). Dev-only tools go in `dev`.
-- Downdetector blocks non-browser clients with a 403. That still means the site is reachable, so only
-  5xx responses, timeouts and connection errors count as down.
 - Notebook runs are configured by `MICROSCOPE_TOOLBOX_JUPYTER_URL`, `MICROSCOPE_TOOLBOX_JUPYTER_PASSWORD`
   and `MICROSCOPE_TOOLBOX_NOTEBOOK_PATH` (relative to the Jupyter server's root, i.e. the part after
   `/notebooks/` in its URL). Executed copies are saved locally in `MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR`
   (default `notebook_runs/`, gitignored); the notebook on the server is never modified.
 - The microscope and experiment type lists are `Microscope` and `ExpType` in `imaging_run_query.py`;
   the page's dropdowns load them from `/microscopes` and `/exp-types`. `ExpType` leaves out
-  misspelled and retired values found in the database (`deccode`, `chemqc`, `aborted`, ...). The database stores names in two casings (`TIGERD4`, `TigerD4`) but compares
-  case-insensitively, so list each microscope once.
+  misspelled and retired values found in the database (`deccode`, `chemqc`, `aborted`, ...). The
+  database stores names in two casings (`TIGERD4`, `TigerD4`) but compares case-insensitively, so
+  list each microscope once.
 - Imaging run query text is pasted into Python string literals that DataJoint sends as SQL, so
-  `QueryText` (run name) only allows letters, digits, spaces and `_ . - / %`. Don't loosen that pattern to admit
-  quotes or backslashes.
+  `QueryText` (run name) only allows letters, digits, spaces and `_ . - / %`. Don't loosen that
+  pattern to admit quotes or backslashes.
 - The kernel runs on the Jupyter server with the notebook's folder as working directory, so the
   notebook uses the server's packages and data paths, not this venv's.
-- Tests must not use the network or start a Jupyter kernel. Mock `requests.get` and
+- Tests must not use the network or start a Jupyter kernel. Mock
   `notebook_runs.JupyterServer` via `monkeypatch`, as in `test_api.py`; `test_remote_jupyter.py`
   scripts kernel messages with a fake websocket.
 - New static files are packaged automatically via `MANIFEST.in` (`recursive-include ... static *`).
