@@ -41,10 +41,39 @@
         <div class="card shadow-sm mt-4">
             <div class="card-body">
                 <h2 class="h4 card-title mb-3">Run Notebook</h2>
-                <button id="run-notebook-button" type="button" class="btn btn-primary">
-                    <span id="run-notebook-spinner" class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
-                    Run
-                </button>
+                <form id="imaging-run-query-form">
+                    <p class="text-body-secondary small">Select imaging runs. Leave a field empty to skip that restriction.</p>
+                    <div class="mb-3">
+                        <label for="run-started-after" class="form-label">Run started after</label>
+                        <input id="run-started-after" name="run_started_after" type="date" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label for="microscope" class="form-label">Microscope</label>
+                        <select id="microscope" name="microscope" class="form-select">
+                            <option value="">Any microscope</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="exp-lgid" class="form-label">LabGuru experiment ID (LG number)</label>
+                        <input id="exp-lgid" name="exp_lgid" type="number" min="1" class="form-control">
+                        <div class="form-text">When using the stage testing script, use LG numbers: <code>145127</code>, <code>145128</code>, and <code>145129</code>.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="run-name-contains" class="form-label">Run name contains</label>
+                        <input id="run-name-contains" name="run_name_contains" class="form-control">
+                        <div class="form-text">When using the stage testing script, use the <code>SNXXXX</code> prefix. <code>%</code> matches any sequence of characters.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="exp-type" class="form-label">Experiment type</label>
+                        <select id="exp-type" name="exp_type" class="form-select">
+                            <option value="">Any experiment type</option>
+                        </select>
+                    </div>
+                    <button id="run-notebook-button" type="submit" class="btn btn-primary">
+                        <span id="run-notebook-spinner" class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+                        Run
+                    </button>
+                </form>
                 <div id="notebook-run-alert" class="alert mt-3 mb-0 d-none" role="alert">
                     <div id="notebook-run-alert-title" class="fw-semibold"></div>
                     <pre id="notebook-run-alert-body" class="mb-0 mt-2 small text-wrap"></pre>
@@ -127,6 +156,11 @@
         refreshDowndetectorStatus();
         setInterval(refreshDowndetectorStatus, STATUS_REFRESH_INTERVAL_MS);
 
+        const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgid", "run_name_contains", "exp_type"];
+        const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
+        const DEFAULT_MICROSCOPE = "TigerS4";
+        const DEFAULT_EXP_TYPE = "automation-qc";
+        const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
         const runNotebookButton = document.getElementById("run-notebook-button");
         const runNotebookSpinner = document.getElementById("run-notebook-spinner");
         const notebookRunAlert = document.getElementById("notebook-run-alert");
@@ -146,16 +180,64 @@
             executedNotebookPanel.classList.remove("d-none");
         }
 
-        runNotebookButton.addEventListener("click", async () => {
+        function defaultRunStartedAfter() {
+            const runStartedAfter = new Date();
+            runStartedAfter.setDate(runStartedAfter.getDate() - DEFAULT_RUN_STARTED_DAYS_AGO);
+            // en-CA formats local dates as YYYY-MM-DD, which date inputs require.
+            return runStartedAfter.toLocaleDateString("en-CA");
+        }
+
+        function imagingRunQueryFromForm() {
+            const imagingRunQuery = {};
+            for (const field of IMAGING_RUN_QUERY_FIELDS) {
+                imagingRunQuery[field] = imagingRunQueryForm[field].value.trim() || null;
+            }
+            return imagingRunQuery;
+        }
+
+        function errorDetailText(errorDetail) {
+            if (Array.isArray(errorDetail)) {
+                return errorDetail.map((validationError) => {
+                    const field = validationError.loc.slice(1).join(".");
+                    return field ? `${field}: ${validationError.msg}` : validationError.msg;
+                }).join("\n");
+            }
+            return typeof errorDetail === "string" ? errorDetail : JSON.stringify(errorDetail);
+        }
+
+        async function loadSelectOptions(select, url, defaultValue) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error("HTTP " + response.status);
+                }
+                const optionValues = await response.json();
+                select.append(...optionValues.map((optionValue) => new Option(optionValue, optionValue)));
+                select.value = defaultValue;
+            } catch (error) {
+                showNotebookRunAlert("danger", "Could not load " + url, String(error));
+            }
+        }
+
+        imagingRunQueryForm.run_started_after.value = defaultRunStartedAfter();
+        loadSelectOptions(imagingRunQueryForm.microscope, "/microscopes", DEFAULT_MICROSCOPE);
+        loadSelectOptions(imagingRunQueryForm.exp_type, "/exp-types", DEFAULT_EXP_TYPE);
+
+        imagingRunQueryForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
             runNotebookButton.disabled = true;
             runNotebookSpinner.classList.remove("d-none");
             showNotebookRunAlert("secondary", "Running…", "");
             executedNotebookPanel.classList.add("d-none");
             try {
-                const response = await fetch("/notebook-runs", { method: "POST" });
+                const response = await fetch("/notebook-runs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(imagingRunQueryFromForm()),
+                });
                 const notebookRun = await response.json();
                 if (!response.ok) {
-                    showNotebookRunAlert("danger", "Error " + response.status, notebookRun.detail ?? JSON.stringify(notebookRun));
+                    showNotebookRunAlert("danger", "Error " + response.status, errorDetailText(notebookRun.detail ?? notebookRun));
                 } else if (notebookRun.succeeded) {
                     showNotebookRunAlert("success", "Finished", notebookRun.executed_notebook_path);
                     showExecutedNotebook(notebookRun.html);

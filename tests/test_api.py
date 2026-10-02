@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import microscope_toolbox.api as api
 from microscope_toolbox import notebook_runs
 from microscope_toolbox.api import app
+from microscope_toolbox.imaging_run_query import IMAGING_RUNS_DEFINITION
 from microscope_toolbox.remote_jupyter import CellExecution, JupyterServerError
 
 client = TestClient(app)
@@ -186,3 +187,54 @@ def test_notebook_run_with_unreachable_server(jupyter_server: MagicMock) -> None
     jupyter_server.log_in.side_effect = requests.ConnectionError("refused")
     response = client.post("/notebook-runs")
     assert response.status_code == 502
+
+
+def test_list_microscopes() -> None:
+    response = client.get("/microscopes")
+    assert response.status_code == 200
+    assert response.json()[0] == "TigerD1"
+    assert "Tigger" in response.json()
+
+
+def test_list_exp_types() -> None:
+    response = client.get("/exp-types")
+    assert response.status_code == 200
+    assert "automation-qc" in response.json()
+
+
+def test_notebook_run_with_imaging_run_query(jupyter_server: MagicMock) -> None:
+    notebook = jupyter_server.fetch_notebook.return_value
+    notebook.cells[0].source = "# Saved restrictions\n" + IMAGING_RUNS_DEFINITION
+    kernel = remote_kernel(jupyter_server)
+    kernel.execute.side_effect = [
+        CellExecution(execution_count=1),
+        stdout_cell_execution("384 wells"),
+    ]
+    response = client.post(
+        "/notebook-runs", json={"microscope": "TigerD4", "exp_lgid": 3035916}
+    )
+    assert response.status_code == 201
+    imaging_runs_cell_source = kernel.execute.call_args_list[0].args[0]
+    assert "# Saved restrictions" not in imaging_runs_cell_source
+    assert "'prop_value=\"TigerD4\"'" in imaging_runs_cell_source
+    assert "'exp_lgid = 3035916'" in imaging_runs_cell_source
+
+
+def test_notebook_run_without_imaging_runs_cell(jupyter_server: MagicMock) -> None:
+    response = client.post("/notebook-runs", json={"microscope": "TigerD4"})
+    assert response.status_code == 502
+    assert IMAGING_RUNS_DEFINITION in response.json()["detail"]
+
+
+def test_imaging_run_query_needs_a_restriction(jupyter_server: MagicMock) -> None:
+    response = client.post("/notebook-runs", json={"run_name_contains": "  "})
+    assert response.status_code == 422
+    jupyter_server.log_in.assert_not_called()
+
+
+def test_imaging_run_query_rejects_quotes(jupyter_server: MagicMock) -> None:
+    response = client.post(
+        "/notebook-runs", json={"run_name_contains": 'sn8689"; DROP TABLE runs'}
+    )
+    assert response.status_code == 422
+    jupyter_server.log_in.assert_not_called()

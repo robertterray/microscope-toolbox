@@ -13,6 +13,7 @@ classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "requests>=2.25",
     "fastapi>=0.100",
+    "pydantic>=2",
     "uvicorn>=0.23",
     "nbformat>=5",
     "nbconvert>=7",
@@ -23,6 +24,7 @@ dependencies = [
 pinned = [
     "requests==2.31.0",
     "fastapi==0.115.0",
+    "pydantic==2.13.5",
     "uvicorn==0.30.6",
     # nbformat 5.11+ requires Python 3.10
     "nbformat==5.10.4",

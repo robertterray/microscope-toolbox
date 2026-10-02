@@ -13,9 +13,11 @@ On top of that, this repo contains a small FastAPI web app:
 - **Downdetector status**: the server checks whether downdetector.com is reachable and reports the
   result.
 - **Notebook runs**: the server runs a notebook on a remote Jupyter Notebook 6 server (zeus2) in a
-  fresh kernel there, and returns the executed copy rendered as HTML.
-- **Web page**: a single static page with a form to create items, a button that runs the notebook and
-  shows its output, and a status bar for downdetector.com that refreshes every 5 seconds.
+  fresh kernel there, and returns the executed copy rendered as HTML. An optional imaging run query
+  (run start date, microscope, LG number, run name, experiment type) replaces the notebook's
+  `imaging_runs = exp.ImagingRuns * ...` cell before it runs.
+- **Web page**: a single static page with a form to create items, an imaging run query form that runs
+  the notebook and shows its output, and a status bar for downdetector.com that refreshes every 5 seconds.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
@@ -24,11 +26,13 @@ On top of that, this repo contains a small FastAPI web app:
 - `microscope_toolbox/api.py`: FastAPI app, holding all routes and Pydantic models.
 - `microscope_toolbox/notebook_runs.py`: notebook run configuration, cell-by-cell execution, saving
   and HTML rendering.
+- `microscope_toolbox/imaging_run_query.py`: the imaging run query model and the code it writes into
+  the notebook's `imaging_runs` cell.
 - `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
   contents API, sessions API and the kernel websocket.
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
   build step. `vendor/` holds a local copy of Bootstrap 5.3.3 CSS, so the page works offline.
-- `tests/`: pytest suite (`test_api.py`).
+- `tests/`: pytest suite (`test_api.py`, `test_imaging_run_query.py`, `test_remote_jupyter.py`).
 
 ## API
 
@@ -38,7 +42,9 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/items/{item_id}` | Stub; 404 when `item_id < 1` |
 | POST | `/items` | Stub create; returns 201 |
 | GET | `/status/downdetector` | Reachability of downdetector.com |
-| POST | `/notebook-runs` | Run the configured notebook (blocks); 201 even if a cell fails, 502 if the Jupyter server fails |
+| GET | `/microscopes` | Microscopes an imaging run query can restrict to |
+| GET | `/exp-types` | Experiment types an imaging run query can restrict to |
+| POST | `/notebook-runs` | Run the configured notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `imaging_runs` cell |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
@@ -101,6 +107,13 @@ A reader should be able to follow the code from its names alone, without comment
   and `MICROSCOPE_TOOLBOX_NOTEBOOK_PATH` (relative to the Jupyter server's root, i.e. the part after
   `/notebooks/` in its URL). Executed copies are saved locally in `MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR`
   (default `notebook_runs/`, gitignored); the notebook on the server is never modified.
+- The microscope and experiment type lists are `Microscope` and `ExpType` in `imaging_run_query.py`;
+  the page's dropdowns load them from `/microscopes` and `/exp-types`. `ExpType` leaves out
+  misspelled and retired values found in the database (`deccode`, `chemqc`, `aborted`, ...). The database stores names in two casings (`TIGERD4`, `TigerD4`) but compares
+  case-insensitively, so list each microscope once.
+- Imaging run query text is pasted into Python string literals that DataJoint sends as SQL, so
+  `QueryText` (run name) only allows letters, digits, spaces and `_ . - / %`. Don't loosen that pattern to admit
+  quotes or backslashes.
 - The kernel runs on the Jupyter server with the notebook's folder as working directory, so the
   notebook uses the server's packages and data paths, not this venv's.
 - Tests must not use the network or start a Jupyter kernel. Mock `requests.get` and

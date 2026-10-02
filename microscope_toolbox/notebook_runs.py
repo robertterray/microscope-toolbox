@@ -11,6 +11,10 @@ import nbformat
 from nbconvert import HTMLExporter
 from nbformat import NotebookNode
 
+from microscope_toolbox.imaging_run_query import (
+    ImagingRunQuery,
+    write_imaging_run_query,
+)
 from microscope_toolbox.remote_jupyter import JupyterServer
 
 JUPYTER_URL_ENV_VAR = "MICROSCOPE_TOOLBOX_JUPYTER_URL"
@@ -58,11 +62,15 @@ def configured_remote_notebook() -> RemoteNotebook:
     )
 
 
-def execute_notebook(remote_notebook: RemoteNotebook) -> ExecutedNotebook:
+def execute_notebook(
+    remote_notebook: RemoteNotebook, imaging_run_query: Optional[ImagingRunQuery]
+) -> ExecutedNotebook:
     """Stops at the first failing cell, like papermill and Jupyter's "Run All"."""
     jupyter_server = JupyterServer(remote_notebook.jupyter_url)
     jupyter_server.log_in(remote_notebook.jupyter_password)
     notebook = jupyter_server.fetch_notebook(remote_notebook.notebook_path)
+    if imaging_run_query is not None:
+        write_imaging_run_query(notebook, imaging_run_query)
     code_cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
     # Clear saved outputs so cells after a failure don't show stale results.
     for cell in code_cells:
