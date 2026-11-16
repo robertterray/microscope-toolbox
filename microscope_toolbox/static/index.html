@@ -77,6 +77,17 @@
             notebookRunAlertBody.textContent = message;
         }
 
+        function imagingRunQueryDescription() {
+            return IMAGING_RUN_QUERY_FIELDS
+                .map((field) => imagingRunQueryForm[field])
+                .filter((input) => input.value.trim())
+                .map((input) => {
+                    const label = document.querySelector(`label[for="${input.id}"]`).textContent;
+                    return `${label}: ${input.value.trim()}`;
+                })
+                .join("\n");
+        }
+
         function showExecutedNotebook(notebookHtml) {
             executedNotebook.srcdoc = notebookHtml;
             executedNotebookPanel.classList.remove("d-none");
@@ -140,6 +151,8 @@
                 const notebookRun = await response.json();
                 if (!response.ok) {
                     showNotebookRunAlert("danger", "Error " + response.status, errorDetailText(notebookRun.detail ?? notebookRun));
+                } else if (notebookRun.no_matching_imaging_runs) {
+                    showNotebookRunAlert("warning", "No imaging runs match", imagingRunQueryDescription());
                 } else if (notebookRun.succeeded) {
                     showNotebookRunAlert("success", "Finished", notebookRun.executed_notebook_path);
                     showExecutedNotebook(notebookRun.html);

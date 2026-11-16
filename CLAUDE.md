@@ -11,7 +11,8 @@ On top of that, this repo contains a small FastAPI web app:
 - **Notebook runs**: the server runs a notebook on a remote Jupyter Notebook 6 server (zeus2) in a
   fresh kernel there, and returns the executed copy rendered as HTML. An optional imaging run query
   (run start date, microscope, LG number, run name, experiment type) replaces the notebook's
-  `imaging_runs = exp.ImagingRuns * ...` cell before it runs.
+  `query_params = paq.RunQueryParamsView()` cell before it runs. The configured notebook is
+  `automations_qc_notebook-microscope_toolbox_version.ipynb` from terray_notebooks.
 - **Web page**: a single static page with an imaging run query form that runs the notebook and shows
   its output.
 
@@ -23,7 +24,7 @@ On top of that, this repo contains a small FastAPI web app:
 - `microscope_toolbox/notebook_runs.py`: notebook run configuration, cell-by-cell execution, saving
   and HTML rendering.
 - `microscope_toolbox/imaging_run_query.py`: the imaging run query model and the code it writes into
-  the notebook's `imaging_runs` cell.
+  the notebook's `query_params` cell.
 - `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
   contents API, sessions API and the kernel websocket.
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
@@ -37,7 +38,7 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/health` | Liveness check |
 | GET | `/microscopes` | Microscopes an imaging run query can restrict to |
 | GET | `/exp-types` | Experiment types an imaging run query can restrict to |
-| POST | `/notebook-runs` | Run the configured notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `imaging_runs` cell |
+| POST | `/notebook-runs` | Run the configured notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `query_params` cell |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
@@ -107,6 +108,12 @@ A reader should be able to follow the code from its names alone, without comment
 - Imaging run query text is pasted into Python string literals that DataJoint sends as SQL, so
   `QueryText` (run name) only allows letters, digits, spaces and `_ . - / %`. Don't loosen that
   pattern to admit quotes or backslashes.
+- The notebook's tables and graphs are Panel widgets. The exported HTML draws them with Bokeh and
+  Vega loaded from CDNs, but anything that calls back into Python (row clicks, the misalignment
+  slider, the run and channel dropdowns) does nothing because no kernel is attached.
+- The notebook signals "no runs match" only through the text of its `ValueError`s, so
+  `NO_MATCHING_IMAGING_RUNS_ERRORS` in `imaging_run_query.py` must follow any change to those
+  messages in the notebook.
 - The kernel runs on the Jupyter server with the notebook's folder as working directory, so the
   notebook uses the server's packages and data paths, not this venv's.
 - Tests must not use the network or start a Jupyter kernel. Mock

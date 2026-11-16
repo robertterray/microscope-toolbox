@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from microscope_toolbox import notebook_runs
 from microscope_toolbox.api import app
-from microscope_toolbox.imaging_run_query import IMAGING_RUNS_DEFINITION
+from microscope_toolbox.imaging_run_query import QUERY_PARAMS_DEFINITION
 from microscope_toolbox.remote_jupyter import CellExecution, JupyterServerError
 
 client = TestClient(app)
@@ -109,8 +109,20 @@ def test_notebook_run_stops_at_failing_cell(jupyter_server: MagicMock) -> None:
     notebook_run = response.json()
     assert notebook_run["succeeded"] is False
     assert notebook_run["error"] == "NameError: name 'plate' is not defined"
+    assert notebook_run["no_matching_imaging_runs"] is False
     assert "stale output" not in notebook_run["html"]
     assert kernel.execute.call_count == 1
+
+
+def test_notebook_run_with_no_matching_imaging_runs(jupyter_server: MagicMock) -> None:
+    remote_kernel(jupyter_server).execute.side_effect = [
+        CellExecution(execution_count=1, error="ValueError: The Dataframe is empty")
+    ]
+    response = client.post("/notebook-runs")
+    assert response.status_code == 201
+    notebook_run = response.json()
+    assert notebook_run["succeeded"] is False
+    assert notebook_run["no_matching_imaging_runs"] is True
 
 
 def test_notebook_run_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +165,7 @@ def test_list_exp_types() -> None:
 
 def test_notebook_run_with_imaging_run_query(jupyter_server: MagicMock) -> None:
     notebook = jupyter_server.fetch_notebook.return_value
-    notebook.cells[0].source = "# Saved restrictions\n" + IMAGING_RUNS_DEFINITION
+    notebook.cells[0].source = QUERY_PARAMS_DEFINITION + "\nquery_params"
     kernel = remote_kernel(jupyter_server)
     kernel.execute.side_effect = [
         CellExecution(execution_count=1),
@@ -163,16 +175,16 @@ def test_notebook_run_with_imaging_run_query(jupyter_server: MagicMock) -> None:
         "/notebook-runs", json={"microscope": "TigerD4", "exp_lgid": 3035916}
     )
     assert response.status_code == 201
-    imaging_runs_cell_source = kernel.execute.call_args_list[0].args[0]
-    assert "# Saved restrictions" not in imaging_runs_cell_source
-    assert "'prop_value=\"TigerD4\"'" in imaging_runs_cell_source
-    assert "'exp_lgid = 3035916'" in imaging_runs_cell_source
+    query_params_cell_source = kernel.execute.call_args_list[0].args[0]
+    assert QUERY_PARAMS_DEFINITION not in query_params_cell_source
+    assert "'microscope': 'TigerD4'" in query_params_cell_source
+    assert "exp_lgids=[3035916]," in query_params_cell_source
 
 
-def test_notebook_run_without_imaging_runs_cell(jupyter_server: MagicMock) -> None:
+def test_notebook_run_without_query_params_cell(jupyter_server: MagicMock) -> None:
     response = client.post("/notebook-runs", json={"microscope": "TigerD4"})
     assert response.status_code == 502
-    assert IMAGING_RUNS_DEFINITION in response.json()["detail"]
+    assert QUERY_PARAMS_DEFINITION in response.json()["detail"]
 
 
 def test_imaging_run_query_needs_a_restriction(jupyter_server: MagicMock) -> None:

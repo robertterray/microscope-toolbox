@@ -13,7 +13,8 @@ from microscope_toolbox.imaging_run_query import (
     EXP_TYPES,
     MICROSCOPES,
     ImagingRunQuery,
-    ImagingRunsCellNotFoundError,
+    QueryParamsCellNotFoundError,
+    is_no_matching_imaging_runs_error,
 )
 from microscope_toolbox.remote_jupyter import JupyterServerError
 
@@ -27,6 +28,7 @@ class NotebookRun(BaseModel):
     executed_notebook_path: str
     succeeded: bool
     error: Optional[str] = None
+    no_matching_imaging_runs: bool = False
     html: str
 
 
@@ -53,10 +55,11 @@ def create_notebook_run(
 ) -> NotebookRun:
     """Run the configured notebook on its Jupyter server and return it as HTML.
 
-    An imaging run query replaces the notebook's `imaging_runs` cell; without one
+    An imaging run query replaces the notebook's `query_params` cell; without one
     the notebook runs as saved. Blocks until the notebook finishes. A failing cell
     still returns 201, with `succeeded` false and the notebook rendered up to the
-    failing cell.
+    failing cell. `no_matching_imaging_runs` is true when it failed because no
+    imaging runs match the query.
     """
     try:
         remote_notebook = notebook_runs.configured_remote_notebook()
@@ -68,18 +71,22 @@ def create_notebook_run(
         )
     except (
         JupyterServerError,
-        ImagingRunsCellNotFoundError,
+        QueryParamsCellNotFoundError,
         requests.RequestException,
     ) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     executed_notebook_path = notebook_runs.save_executed_notebook(
         executed_notebook.notebook, remote_notebook.notebook_path
     )
+    cell_error = executed_notebook.cell_error
     return NotebookRun(
         notebook_url=remote_notebook.notebook_url,
         executed_notebook_path=str(executed_notebook_path),
-        succeeded=executed_notebook.cell_error is None,
-        error=executed_notebook.cell_error,
+        succeeded=cell_error is None,
+        error=cell_error,
+        no_matching_imaging_runs=(
+            cell_error is not None and is_no_matching_imaging_runs_error(cell_error)
+        ),
         html=notebook_runs.render_notebook_html(executed_notebook.notebook),
     )
 

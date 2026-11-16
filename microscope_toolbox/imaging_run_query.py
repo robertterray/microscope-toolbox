@@ -6,9 +6,10 @@ from typing import Annotated, List, Literal, Optional, get_args
 from nbformat import NotebookNode
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
-IMAGING_RUNS_DEFINITION = (
-    "imaging_runs = exp.ImagingRuns * exp.LinkedRuns * exp.Experiments"
-)
+QUERY_PARAMS_DEFINITION = "query_params = paq.RunQueryParamsView()"
+# The notebook always restricts runs to a date range, so a query without a start
+# date starts from before the first imaging run.
+EARLIEST_RUN_START = date(2000, 1, 1)
 
 # Values are pasted into Python string literals that DataJoint passes on as SQL, so
 # quotes and backslashes must never get through.
@@ -50,7 +51,7 @@ ExpType = Literal["decode", "assay", "chem-qc", "automation-qc", "sizing", "othe
 EXP_TYPES: List[str] = list(get_args(ExpType))
 
 
-class ImagingRunsCellNotFoundError(Exception):
+class QueryParamsCellNotFoundError(Exception):
     pass
 
 
@@ -70,35 +71,33 @@ class ImagingRunQuery(BaseModel):
         return self
 
 
-def run_prop_restriction(prop_name: str, prop_value: str) -> str:
-    return f"exp.RunProps & 'prop_name=\"{prop_name}\"' & 'prop_value=\"{prop_value}\"'"
-
-
-def imaging_runs_cell_source(imaging_run_query: ImagingRunQuery) -> str:
-    restrictions: List[str] = []
-    if imaging_run_query.run_started_after is not None:
-        run_started_after = imaging_run_query.run_started_after.isoformat()
-        restrictions.append(f"'run_start > \"{run_started_after}\"'")
-    if imaging_run_query.microscope is not None:
-        restrictions.append(
-            run_prop_restriction("microscope", imaging_run_query.microscope)
-        )
-    if imaging_run_query.exp_lgid is not None:
-        restrictions.append(f"'exp_lgid = {imaging_run_query.exp_lgid}'")
-    if imaging_run_query.run_name_contains is not None:
-        restrictions.append(
-            f"'run_name LIKE \"%{imaging_run_query.run_name_contains}%\"'"
-        )
-    if imaging_run_query.exp_type is not None:
-        restrictions.append(
-            run_prop_restriction("exp_type", imaging_run_query.exp_type)
-        )
+def query_params_cell_source(imaging_run_query: ImagingRunQuery) -> str:
+    run_started_after = imaging_run_query.run_started_after or EARLIEST_RUN_START
+    exp_lgids = (
+        [] if imaging_run_query.exp_lgid is None else [imaging_run_query.exp_lgid]
+    )
+    exp_types = (
+        [] if imaging_run_query.exp_type is None else [imaging_run_query.exp_type]
+    )
+    # The notebook skips a property restriction whose value is "" or [].
+    property_values = {
+        "microscope": imaging_run_query.microscope or "",
+        "spotted": "",
+        "exp_type": exp_types,
+    }
     return "\n".join(
         [
-            "# Restrictions entered in the microscope_toolbox web page",
-            IMAGING_RUNS_DEFINITION,
+            "# Query entered in the microscope_toolbox web page",
+            "query_params = paq.RunQueryParamsView(",
+            f"    run_name={imaging_run_query.run_name_contains or ''!r},",
+            f"    exp_lgids={exp_lgids!r},",
+            f"    property_values={property_values!r},",
+            ")",
+            "query_params.update_date_range(",
+            f"    start_dt=datetime.fromisoformat({run_started_after.isoformat()!r}),",
+            "    end_dt=datetime.now(),",
+            ")",
         ]
-        + [f"imaging_runs &= {restriction}" for restriction in restrictions]
     )
 
 
@@ -106,9 +105,23 @@ def write_imaging_run_query(
     notebook: NotebookNode, imaging_run_query: ImagingRunQuery
 ) -> None:
     for cell in notebook.cells:
-        if cell.cell_type == "code" and IMAGING_RUNS_DEFINITION in cell.source:
-            cell.source = imaging_runs_cell_source(imaging_run_query)
+        if cell.cell_type == "code" and QUERY_PARAMS_DEFINITION in cell.source:
+            cell.source = query_params_cell_source(imaging_run_query)
             return
-    raise ImagingRunsCellNotFoundError(
-        f"The notebook has no code cell containing: {IMAGING_RUNS_DEFINITION}"
+    raise QueryParamsCellNotFoundError(
+        f"The notebook has no code cell containing: {QUERY_PARAMS_DEFINITION}"
     )
+
+
+# The notebook signals an empty query only through the text of the ValueError it
+# raises: in its query cell (date range, LG number, run name) or in the cell that
+# applies the microscope and experiment type.
+NO_MATCHING_IMAGING_RUNS_ERRORS = (
+    "ValueError: No imaging runs found.",
+    "ValueError: No data found for property name",
+    "ValueError: The Dataframe is empty",
+)
+
+
+def is_no_matching_imaging_runs_error(cell_error: str) -> bool:
+    return cell_error.startswith(NO_MATCHING_IMAGING_RUNS_ERRORS)
