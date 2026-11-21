@@ -17,7 +17,7 @@ def test_query_params_cell_source_with_every_restriction() -> None:
     imaging_run_query = ImagingRunQuery(
         run_started_after=date(2026, 9, 25),
         microscope="TigerD4",
-        exp_lgid=3035916,
+        exp_lgids=[3035916],
         run_name_contains="sn8689",
         exp_type="automation-qc",
     )

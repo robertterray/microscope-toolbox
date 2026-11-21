@@ -193,13 +193,14 @@ def test_notebook_run_with_imaging_run_query(
         stdout_cell_execution("384 wells"),
     ]
     response = client.post(
-        "/notebook-runs", json={"microscope": "TigerD4", "exp_lgid": 3035916}
+        "/notebook-runs",
+        json={"microscope": "TigerD4", "exp_lgids": [3035916, 3037159]},
     )
     assert response.status_code == 201
     query_params_cell_source = kernel.execute.call_args_list[0].args[0]
     assert QUERY_PARAMS_DEFINITION not in query_params_cell_source
     assert "'microscope': 'TigerD4'" in query_params_cell_source
-    assert "exp_lgids=[3035916]," in query_params_cell_source
+    assert "exp_lgids=[3035916, 3037159]," in query_params_cell_source
 
 
 def test_notebook_run_without_query_params_cell(jupyter_server: MagicMock) -> None:
@@ -253,6 +254,7 @@ IMAGING_RUN = {
     "filled_p875_intensities": {"AF405": 1200.0},
     "vignette_scores": {"AF405": 0.2},
     "percent_well_separated_cntr": 97.5,
+    "fov_max_px_errors": [0.5, None, 4.0],
 }
 
 
@@ -260,7 +262,8 @@ def test_list_imaging_runs(jupyter_server: MagicMock) -> None:
     kernel = remote_kernel(jupyter_server)
     kernel.execute.return_value = imaging_runs_cell_execution([IMAGING_RUN])
     response = client.get(
-        "/imaging-runs", params={"microscope": "TigerD4", "exp_lgid": 3035916}
+        "/imaging-runs",
+        params={"microscope": "TigerD4", "exp_lgids": [3035916, 3037159]},
     )
     assert response.status_code == 200
     assert response.json() == [{**IMAGING_RUN, "run_start": "2026-09-25T10:00:00"}]
@@ -269,7 +272,7 @@ def test_list_imaging_runs(jupyter_server: MagicMock) -> None:
     )
     kernel_code = kernel.execute.call_args.args[0]
     assert '"microscope":"TigerD4"' in kernel_code
-    assert '"exp_lgid":3035916' in kernel_code
+    assert '"exp_lgids":[3035916,3037159]' in kernel_code
 
 
 def test_list_imaging_runs_with_no_matches(jupyter_server: MagicMock) -> None:

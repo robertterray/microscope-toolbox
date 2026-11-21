@@ -4,7 +4,7 @@ from datetime import date
 from typing import Annotated, List, Literal, Optional, get_args
 
 from nbformat import NotebookNode
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, PositiveInt, StringConstraints, model_validator
 
 QUERY_PARAMS_DEFINITION = "query_params = paq.RunQueryParamsView()"
 # The notebook always restricts runs to a date range, so a query without a start
@@ -58,7 +58,7 @@ class QueryParamsCellNotFoundError(Exception):
 class ImagingRunQuery(BaseModel):
     run_started_after: Optional[date] = None
     microscope: Optional[Microscope] = None
-    exp_lgid: Optional[int] = Field(default=None, ge=1)
+    exp_lgids: List[PositiveInt] = []
     run_name_contains: Optional[QueryText] = None
     exp_type: Optional[ExpType] = None
 
@@ -66,16 +66,13 @@ class ImagingRunQuery(BaseModel):
     def require_a_restriction(self) -> "ImagingRunQuery":
         # Without restrictions the notebook would download QC metrics for every
         # imaging run ever recorded.
-        if all(value is None for value in self.model_dump().values()):
+        if not any(self.model_dump().values()):
             raise ValueError("Enter at least one restriction")
         return self
 
 
 def query_params_cell_source(imaging_run_query: ImagingRunQuery) -> str:
     run_started_after = imaging_run_query.run_started_after or EARLIEST_RUN_START
-    exp_lgids = (
-        [] if imaging_run_query.exp_lgid is None else [imaging_run_query.exp_lgid]
-    )
     exp_types = (
         [] if imaging_run_query.exp_type is None else [imaging_run_query.exp_type]
     )
@@ -90,7 +87,7 @@ def query_params_cell_source(imaging_run_query: ImagingRunQuery) -> str:
             "# Query entered in the microscope_toolbox web page",
             "query_params = paq.RunQueryParamsView(",
             f"    run_name={imaging_run_query.run_name_contains or ''!r},",
-            f"    exp_lgids={exp_lgids!r},",
+            f"    exp_lgids={imaging_run_query.exp_lgids!r},",
             f"    property_values={property_values!r},",
             ")",
             "query_params.update_date_range(",

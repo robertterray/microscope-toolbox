@@ -7,9 +7,10 @@ automations_qc_notebook.ipynb (48c8e75).
 """
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
+    import numpy as np
     import pandas as pd
 
 RUN_COLUMNS = [
@@ -42,6 +43,27 @@ def values_by_phot_id(
     return values
 
 
+def fov_max_px_errors(
+    alignment_qc_metrics: Dict[str, "np.ndarray"]
+) -> List[Optional[float]]:
+    import numpy as np
+
+    # total_px_err and tracked are indexed (axis, channel, FOV). The notebook counts
+    # an FOV as misaligned when a channel tracked in both axes has an absolute error
+    # above the threshold in either axis, so the largest such error per FOV gives
+    # the count for any threshold. NaN errors never exceed a threshold.
+    abs_px_errors = np.abs(alignment_qc_metrics["total_px_err"])
+    abs_px_errors = np.where(np.isnan(abs_px_errors), -np.inf, abs_px_errors)
+    tracked_in_both_axes = np.all(alignment_qc_metrics["tracked"], axis=0)
+    tracked_px_errors = np.where(
+        tracked_in_both_axes, abs_px_errors.max(axis=0), -np.inf
+    )
+    return [
+        None if np.isneginf(px_error) else float(px_error)
+        for px_error in tracked_px_errors.max(axis=0)
+    ]
+
+
 def fetch_imaging_runs(imaging_run_query: Dict[str, Any]) -> List[Dict[str, Any]]:
     import numpy as np
     import pandas as pd
@@ -58,8 +80,8 @@ def fetch_imaging_runs(imaging_run_query: Dict[str, Any]) -> List[Dict[str, Any]
     # name to characters that can't end the string literal (QueryText).
     if imaging_run_query["run_started_after"] is not None:
         imaging_runs &= f'run_start >= "{imaging_run_query["run_started_after"]}"'
-    if imaging_run_query["exp_lgid"] is not None:
-        imaging_runs &= {"exp_lgid": imaging_run_query["exp_lgid"]}
+    if imaging_run_query["exp_lgids"]:
+        imaging_runs &= isin("exp_lgid", imaging_run_query["exp_lgids"])
     if imaging_run_query["run_name_contains"] is not None:
         imaging_runs &= f'run_name LIKE "%{imaging_run_query["run_name_contains"]}%"'
 
@@ -157,5 +179,9 @@ def fetch_imaging_runs(imaging_run_query: Dict[str, Any]) -> List[Dict[str, Any]
         well_separated_cntr = percent_well_separated_cntr.get(phot_id)
         imaging_run_row["percent_well_separated_cntr"] = (
             None if pd.isna(well_separated_cntr) else float(well_separated_cntr)
+        )
+        # Downloads the alignment QC results, about half a second per run.
+        imaging_run_row["fov_max_px_errors"] = fov_max_px_errors(
+            align.Alignments.for_id(imaging_run_row["align_id"]).get_qc_metrics()
         )
     return imaging_run_rows

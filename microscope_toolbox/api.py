@@ -107,8 +107,10 @@ def list_imaging_runs(
 ) -> List[ImagingRun]:
     """Imaging runs matching the query, with their alignment and QC scores.
 
-    The rows of the notebook's runs table, without the misalignment counts. Runs
-    the query in a kernel on the Jupyter server and blocks until it finishes.
+    The rows of the notebook's runs table. Instead of its misaligned FOV count,
+    each run has its largest alignment error per FOV, so any threshold can be
+    applied. Runs the query in a kernel on the Jupyter server and blocks until it
+    finishes, which takes about half a second per run.
     """
     try:
         return imaging_runs.query_imaging_runs(

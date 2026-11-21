@@ -13,7 +13,10 @@ import pytest
 
 from microscope_toolbox.imaging_run_query import ImagingRunQuery
 from microscope_toolbox.imaging_runs import kernel_code
-from microscope_toolbox.imaging_runs_in_kernel import fetch_imaging_runs
+from microscope_toolbox.imaging_runs_in_kernel import (
+    fetch_imaging_runs,
+    fov_max_px_errors,
+)
 
 Row = Dict[str, Any]
 RUN_STARTED_AFTER = re.compile(r'^(\w+) >= "(.+)"$')
@@ -54,6 +57,20 @@ class FakeTable:
         return [
             {attribute: row[attribute] for attribute in attributes} for row in self.rows
         ]
+
+
+class FakeAlignments(FakeTable):
+    def __init__(self, rows: List[Row], qc_metrics_rows: List[Row]) -> None:
+        super().__init__(rows)
+        self.qc_metrics_rows = qc_metrics_rows
+
+    def for_id(self, align_id: int) -> MagicMock:
+        (qc_metrics,) = [
+            row["qc_metrics"]
+            for row in self.qc_metrics_rows
+            if row["align_id"] == align_id
+        ]
+        return MagicMock(**{"get_qc_metrics.return_value": qc_metrics})
 
 
 def matches(row: Row, restriction: Any) -> bool:
@@ -128,6 +145,15 @@ def alignment_rows(
         "Alignments": [{"align_id": align_id, "rawimg_id": rawimg_id}],
         "TaggedAlignments": [{**tag, "align_id": align_id}],
         "AlignmentAttachments": [{"align_id": align_id, "attach_name": "align_qc"}],
+        "AlignmentQcMetrics": [
+            {
+                "align_id": align_id,
+                "qc_metrics": {
+                    "total_px_err": np.full((2, 2, 3), 0.5),
+                    "tracked": np.ones((2, 2, 3), dtype=bool),
+                },
+            }
+        ],
         "TaggedPhotometries": [{**tag, "phot_id": phot_id}],
         "PhotChannelStats": [
             {
@@ -171,6 +197,7 @@ class FakeDatabase:
         self.rows: Dict[str, List[Row]] = {
             table: [] for tables in self.TABLES.values() for table in tables
         }
+        self.rows["AlignmentQcMetrics"] = []
         self.rows["Experiments"] = [
             {"exp_lgid": 3035916, "exp_title": "Automation QC", "exp_owner": "robert"},
             {"exp_lgid": 3037159, "exp_title": "Prehyb", "exp_owner": "zhu"},
@@ -183,12 +210,17 @@ class FakeDatabase:
     def schema(self, name: str) -> types.SimpleNamespace:
         if name not in self.TABLES:
             raise AttributeError(name)
-        return types.SimpleNamespace(
+        schema = types.SimpleNamespace(
             **{
                 table: FakeTable(self.rows[table], self.PRIMARY_KEYS.get(table, ()))
                 for table in self.TABLES[name]
             }
         )
+        if name == "align":
+            schema.Alignments = FakeAlignments(
+                self.rows["Alignments"], self.rows["AlignmentQcMetrics"]
+            )
+        return schema
 
 
 @pytest.fixture
@@ -243,6 +275,7 @@ def test_imaging_run_with_its_qc_scores(database: FakeDatabase) -> None:
             "filled_p875_intensities": {"AF405": 1200.0, "AF458": 900.0},
             "vignette_scores": {"AF405": pytest.approx(0.2)},
             "percent_well_separated_cntr": 97.5,
+            "fov_max_px_errors": [0.5, 0.5, 0.5],
         }
     ]
     # Jupyter refuses to send NaN.
@@ -269,12 +302,74 @@ def test_imaging_runs_restricted_by_query(database: FakeDatabase) -> None:
         automation_qc_query(
             run_started_after="2026-09-24",
             microscope="TigerD4",
-            exp_lgid=3035916,
+            exp_lgids=[3035916],
             run_name_contains="sn8689",
             exp_type="automation-qc",
         )
     )
     assert [imaging_run["rawimg_id"] for imaging_run in imaging_runs] == [11]
+
+
+def test_imaging_runs_matching_any_exp_lgid(database: FakeDatabase) -> None:
+    database.add(imaging_run_rows(11, "SN8689-AA/Chip1", datetime(2026, 9, 25)))
+    database.add(
+        imaging_run_rows(12, "SN8689-AA/Chip2", datetime(2026, 9, 26), exp_lgid=3037159)
+    )
+    database.add(
+        imaging_run_rows(13, "SN8689-AA/Chip3", datetime(2026, 9, 27), exp_lgid=3040000)
+    )
+    for rawimg_id in range(11, 14):
+        database.add(
+            alignment_rows(rawimg_id, align_id=rawimg_id + 10, phot_id=rawimg_id + 20)
+        )
+    imaging_runs = fetch_imaging_runs(automation_qc_query(exp_lgids=[3035916, 3037159]))
+    assert sorted(imaging_run["rawimg_id"] for imaging_run in imaging_runs) == [11, 12]
+
+
+def notebook_n_misaligned(
+    alignment_qc_metrics: Dict[str, np.ndarray], misaligned_thresh: float
+) -> int:
+    is_misaligned = np.any(
+        np.abs(alignment_qc_metrics["total_px_err"]) > misaligned_thresh, axis=0
+    )
+    is_misaligned &= np.all(alignment_qc_metrics["tracked"], axis=0)
+    is_misaligned = np.any(is_misaligned, axis=0)
+    return int(np.sum(is_misaligned))
+
+
+def test_fov_max_px_errors_give_the_notebooks_misaligned_count() -> None:
+    random = np.random.default_rng(seed=0)
+    total_px_err = random.normal(scale=3.0, size=(2, 5, 792))
+    total_px_err[random.random(total_px_err.shape) < 0.1] = np.nan
+    tracked = random.random(total_px_err.shape) < 0.9
+    tracked[:, :, :10] = False
+    alignment_qc_metrics = {"total_px_err": total_px_err, "tracked": tracked}
+    px_errors = fov_max_px_errors(alignment_qc_metrics)
+    assert None in px_errors
+    for misaligned_thresh in [0, 1, 2.5, 3, 5, 100]:
+        assert sum(
+            px_error is not None and px_error > misaligned_thresh
+            for px_error in px_errors
+        ) == notebook_n_misaligned(alignment_qc_metrics, misaligned_thresh)
+
+
+def test_fov_max_px_errors_ignore_untracked_channels() -> None:
+    alignment_qc_metrics = {
+        # (axis, channel, FOV)
+        "total_px_err": np.array(
+            [
+                [[4.0, np.nan, 1.0], [-6.0, 2.0, np.nan]],
+                [[0.0, 1.5, 0.5], [0.0, 2.0, np.nan]],
+            ]
+        ),
+        "tracked": np.array(
+            [
+                [[True, True, True], [False, True, False]],
+                [[True, True, True], [True, True, False]],
+            ]
+        ),
+    }
+    assert fov_max_px_errors(alignment_qc_metrics) == [4.0, 2.0, 1.0]
 
 
 def test_imaging_runs_need_every_run_property(database: FakeDatabase) -> None:

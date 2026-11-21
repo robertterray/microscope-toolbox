@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Automations QC</title>
     <link rel="stylesheet" href="/vendor/bootstrap-5.3.3.min.css">
+    <style>
+        #imaging-runs-table th { font-size: var(--imaging-runs-header-font-size, 16px); }
+        #imaging-runs-table td { font-size: var(--imaging-runs-cell-font-size, 16px); }
+        #imaging-runs-table .frozen-column { position: sticky; z-index: 1; }
+        .freeze-column-button { font-size: 0.8em; line-height: 1; opacity: 0.25; }
+        .freeze-column-button:hover, .freeze-column-button[aria-pressed="true"] { opacity: 1; }
+        /* A border on a sticky cell stays behind when the table scrolls, so the edge is drawn inside the cell. */
+        #imaging-runs-table .last-frozen-column::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: var(--bs-border-color);
+        }
+    </style>
 </head>
 <body class="bg-body-tertiary">
     <div class="container py-5" style="max-width: 540px;">
@@ -24,9 +41,9 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label for="exp-lgid" class="form-label">LabGuru experiment ID (LG number)</label>
-                        <input id="exp-lgid" name="exp_lgid" type="number" min="1" class="form-control">
-                        <div class="form-text">When using the stage testing script, use LG numbers: <code>145127</code>, <code>145128</code>, and <code>145129</code>.</div>
+                        <label for="exp-lgids" class="form-label">LabGuru experiment IDs (LG numbers)</label>
+                        <input id="exp-lgids" name="exp_lgids" inputmode="numeric" pattern="\s*\d+(\s*,\s*\d+)*\s*,?\s*" title="LG numbers separated by commas" placeholder="145127,145128,145129" class="form-control">
+                        <div class="form-text">Separate several LG numbers with commas. The suggestion is the stage testing script's LG numbers; press Tab in the empty field to use it.</div>
                     </div>
                     <div class="mb-3">
                         <label for="run-name-contains" class="form-label">Run name contains</label>
@@ -47,7 +64,7 @@
                         <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
                         Run Notebook
                     </button>
-                    <div class="form-text">Run Notebook also counts misaligned FOVs and draws the alignment heatmaps, but its table rows can't be selected.</div>
+                    <div class="form-text">Run Notebook also draws the alignment heatmaps, but its table rows can't be selected.</div>
                 </form>
                 <div id="query-alert" class="alert mt-3 mb-0 d-none" role="alert">
                     <div id="query-alert-title" class="fw-semibold"></div>
@@ -62,8 +79,31 @@
             <div class="card-body">
                 <h2 class="h5 card-title">Imaging runs</h2>
                 <p class="text-body-secondary small">Select a row to view the hybiscus plot and accompanying histograms. Drawing one takes about 20 seconds.</p>
+                <div class="d-flex align-items-center gap-2 small mb-2">
+                    <label for="misaligned-px-threshold" class="form-label mb-0">Misalignment threshold (px)</label>
+                    <input id="misaligned-px-threshold" type="number" min="0" step="0.5" value="3" class="form-control form-control-sm" style="width: 6rem;">
+                    <span class="text-body-secondary">An FOV is misaligned when a channel tracked in both axes is off by more than this.</span>
+                </div>
+                <details class="small mb-2">
+                    <summary>Columns</summary>
+                    <div id="imaging-run-column-checkboxes" class="d-flex flex-wrap align-items-start column-gap-5 row-gap-3 mt-2"></div>
+                </details>
+                <div class="d-flex flex-wrap justify-content-end align-items-center gap-3 small mb-2">
+                    <div class="input-group input-group-sm w-auto">
+                        <span class="input-group-text">Column titles</span>
+                        <button id="header-font-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller column titles">−</button>
+                        <output id="header-font-size" class="input-group-text"></output>
+                        <button id="header-font-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger column titles">+</button>
+                    </div>
+                    <div class="input-group input-group-sm w-auto">
+                        <span class="input-group-text">Data</span>
+                        <button id="cell-font-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller data">−</button>
+                        <output id="cell-font-size" class="input-group-text"></output>
+                        <button id="cell-font-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger data">+</button>
+                    </div>
+                </div>
                 <div class="table-responsive" style="max-height: 50vh;">
-                    <table class="table table-sm table-hover align-middle mb-0">
+                    <table id="imaging-runs-table" class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light sticky-top">
                             <tr id="imaging-runs-header"></tr>
                         </thead>
@@ -95,22 +135,79 @@
     </div>
 
     <script>
-        const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgid", "run_name_contains", "exp_type"];
+        const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgids", "run_name_contains", "exp_type"];
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
         const DEFAULT_MICROSCOPE = "TigerS4";
         const DEFAULT_EXP_TYPE = "automation-qc";
         const WELL_WATCHER_FOV_METRICS_URL = "https://well-watcher.app.terraytx.com/FOV_Metrics?rawimg_id=";
-        const IMAGING_RUN_COLUMNS = [
-            { label: "Run start", value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
-            { label: "Run name", value: (imagingRun) => imagingRun.run_name },
-            { label: "LG number", value: (imagingRun) => imagingRun.exp_lgid },
-            { label: "Microscope", value: (imagingRun) => imagingRun.microscope },
-            { label: "Experiment type", value: (imagingRun) => imagingRun.exp_type },
-            { label: "Spotted", value: (imagingRun) => imagingRun.spotted },
-            { label: "Focus 405", value: (imagingRun) => formatScore(imagingRun.median_focus_score_405, 3) },
-            { label: "Focus 458", value: (imagingRun) => formatScore(imagingRun.median_focus_score_458, 3) },
-            { label: "AF458 intensity", value: (imagingRun) => formatScore(imagingRun.filled_p875_intensities.AF458, 1) },
-            { label: "% well separated", value: (imagingRun) => formatScore(imagingRun.percent_well_separated_cntr, 1) },
+        const CHANNELS = ["AF405", "AF458", "AF568", "AF633", "AF750"];
+        const IMAGING_RUN_COLUMN_GROUPS = [
+            {
+                label: "Run Details",
+                columns: [
+                    { label: "Run start", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
+                    { label: "Run name", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).runNameWithoutChip },
+                    { label: "LG number", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => imagingRun.exp_lgid },
+                    { label: "Chip", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).chip ?? "–" },
+                    { label: "Microscope", shownByDefault: true, value: (imagingRun) => imagingRun.microscope },
+                    { label: "Duration (s)", shownByDefault: false, value: (imagingRun) => formatScore(imagingRun.run_dur, 0) },
+                    { label: "Experiment", shownByDefault: false, value: (imagingRun) => imagingRun.exp_title },
+                    { label: "Owner", shownByDefault: false, value: (imagingRun) => imagingRun.exp_owner },
+                    { label: "Experiment type", shownByDefault: true, value: (imagingRun) => imagingRun.exp_type },
+                    { label: "Spotted", shownByDefault: true, value: (imagingRun) => imagingRun.spotted },
+                ],
+            },
+            {
+                label: "IDs",
+                columns: [
+                    { label: "Raw image ID", shownByDefault: false, value: (imagingRun) => imagingRun.rawimg_id },
+                    { label: "Alignment ID", shownByDefault: false, value: (imagingRun) => imagingRun.align_id },
+                    { label: "Photometry ID", shownByDefault: false, value: (imagingRun) => imagingRun.phot_id },
+                ],
+            },
+            {
+                label: "Alignment and Focus",
+                columns: [
+                    { label: "Misaligned FOVs", shownByDefault: true, value: misalignedFovCount },
+                    { label: "Focus 405", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_405, 3) },
+                    { label: "Focus 458", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_458, 3) },
+                ],
+            },
+            {
+                label: "Intensities",
+                columns: CHANNELS.map((channel) => ({
+                    label: `${channel} intensity`,
+                    shownByDefault: channel === "AF458",
+                    value: (imagingRun) => formatScore(imagingRun.filled_p875_intensities[channel], 1),
+                })),
+            },
+            {
+                label: "Vignette Scores",
+                columns: CHANNELS.map((channel) => ({
+                    label: `${channel} vignette score`,
+                    shownByDefault: false,
+                    value: (imagingRun) => formatScore(imagingRun.vignette_scores[channel], 3),
+                })),
+            },
+            {
+                // A single column needs no box to select the whole group.
+                label: null,
+                columns: [
+                    { label: "% well separated", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.percent_well_separated_cntr, 1) },
+                ],
+            },
+        ];
+        const IMAGING_RUN_COLUMNS = IMAGING_RUN_COLUMN_GROUPS.flatMap((columnGroup) => columnGroup.columns);
+        const SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY = "shownImagingRunColumns";
+        const FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY = "frozenImagingRunColumns";
+        // Run names end in "Chip<number>", usually after a slash, as in "SN8689-AA/Chip1".
+        const RUN_NAME_WITH_CHIP = /^(.*?)[\s\/_-]*chip\s*(\d+)$/i;
+        const DEFAULT_TABLE_FONT_SIZE_PX = 16;
+        const MIN_TABLE_FONT_SIZE_PX = 8;
+        const MAX_TABLE_FONT_SIZE_PX = 32;
+        const TABLE_FONT_SIZE_CONTROLS = [
+            { name: "header", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx" },
+            { name: "cell", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx" },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
         const queryButtons = [
@@ -123,6 +220,9 @@
         const imagingRunsPanel = document.getElementById("imaging-runs-panel");
         const imagingRunsHeader = document.getElementById("imaging-runs-header");
         const imagingRunsBody = document.getElementById("imaging-runs-body");
+        const imagingRunColumnCheckboxes = document.getElementById("imaging-run-column-checkboxes");
+        const misalignedPxThresholdInput = document.getElementById("misaligned-px-threshold");
+        const imagingRunsTable = document.getElementById("imaging-runs-table");
         const selectedImagingRunPanel = document.getElementById("selected-imaging-run-panel");
         const selectedImagingRunTitle = document.getElementById("selected-imaging-run-title");
         const selectedImagingRunMetrics = document.getElementById("selected-imaging-run-metrics");
@@ -133,6 +233,9 @@
         // A photometry's plot never changes, so each one is drawn at most once per page load.
         const hybiscusPlotUrls = new Map();
         let selectedPhotId = null;
+        let shownImagingRuns = [];
+        const frozenImagingRunColumnLabels = savedImagingRunColumnLabels(FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY)
+            ?? new Set(IMAGING_RUN_COLUMNS.filter((column) => column.frozenByDefault).map((column) => column.label));
 
         function showQueryAlert(variant, title, message) {
             queryAlert.className = `alert alert-${variant} mt-3 mb-0`;
@@ -151,6 +254,44 @@
                 .join("\n");
         }
 
+        function misalignedFovCount(imagingRun) {
+            const misalignedPxThreshold = misalignedPxThresholdInput.valueAsNumber;
+            if (Number.isNaN(misalignedPxThreshold)) {
+                return "–";
+            }
+            return imagingRun.fov_max_px_errors
+                .filter((pxError) => pxError !== null && pxError > misalignedPxThreshold)
+                .length;
+        }
+
+        function runNameAndChip(runName) {
+            const runNameWithChip = RUN_NAME_WITH_CHIP.exec(runName);
+            if (!runNameWithChip) {
+                return { runNameWithoutChip: runName, chip: null };
+            }
+            return { runNameWithoutChip: runNameWithChip[1], chip: Number(runNameWithChip[2]) };
+        }
+
+        function setUpTableFontSizeControl(tableFontSizeControl) {
+            const fontSizeOutput = document.getElementById(`${tableFontSizeControl.name}-font-size`);
+            const decreaseButton = document.getElementById(`${tableFontSizeControl.name}-font-size-decrease`);
+            const increaseButton = document.getElementById(`${tableFontSizeControl.name}-font-size-increase`);
+            const savedFontSizePx = Number(localStorage.getItem(tableFontSizeControl.storageKey));
+            let fontSizePx = savedFontSizePx >= MIN_TABLE_FONT_SIZE_PX && savedFontSizePx <= MAX_TABLE_FONT_SIZE_PX
+                ? savedFontSizePx
+                : DEFAULT_TABLE_FONT_SIZE_PX;
+            function showFontSize() {
+                imagingRunsTable.style.setProperty(tableFontSizeControl.cssProperty, `${fontSizePx}px`);
+                fontSizeOutput.textContent = `${fontSizePx} px`;
+                decreaseButton.disabled = fontSizePx <= MIN_TABLE_FONT_SIZE_PX;
+                increaseButton.disabled = fontSizePx >= MAX_TABLE_FONT_SIZE_PX;
+                localStorage.setItem(tableFontSizeControl.storageKey, String(fontSizePx));
+            }
+            decreaseButton.addEventListener("click", () => { fontSizePx -= 1; showFontSize(); });
+            increaseButton.addEventListener("click", () => { fontSizePx += 1; showFontSize(); });
+            showFontSize();
+        }
+
         function formatScore(score, fractionDigits) {
             return score === null || score === undefined ? "–" : score.toFixed(fractionDigits);
         }
@@ -162,19 +303,32 @@
             return runStartedAfter.toLocaleDateString("en-CA");
         }
 
+        function expLgidsFromForm() {
+            return imagingRunQueryForm.elements.exp_lgids.value
+                .split(",")
+                .map((expLgid) => expLgid.trim())
+                .filter((expLgid) => expLgid);
+        }
+
         function imagingRunQueryFromForm() {
             const imagingRunQuery = {};
             for (const field of IMAGING_RUN_QUERY_FIELDS) {
                 imagingRunQuery[field] = imagingRunQueryForm.elements[field].value.trim() || null;
             }
+            imagingRunQuery.exp_lgids = expLgidsFromForm();
             return imagingRunQuery;
         }
 
         function imagingRunQueryParameters() {
-            const imagingRunQuery = imagingRunQueryFromForm();
-            return new URLSearchParams(
-                Object.entries(imagingRunQuery).filter(([, value]) => value !== null)
-            );
+            const urlSearchParams = new URLSearchParams();
+            for (const [field, value] of Object.entries(imagingRunQueryFromForm())) {
+                for (const parameterValue of [value].flat()) {
+                    if (parameterValue !== null) {
+                        urlSearchParams.append(field, parameterValue);
+                    }
+                }
+            }
+            return urlSearchParams;
         }
 
         function errorDetailText(errorDetail) {
@@ -210,11 +364,162 @@
             }
         }
 
+        function savedImagingRunColumnLabels(storageKey) {
+            try {
+                const columnLabels = JSON.parse(localStorage.getItem(storageKey));
+                return Array.isArray(columnLabels) ? new Set(columnLabels) : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function shownImagingRunColumnLabels() {
+            return new Set(
+                [...imagingRunColumnCheckboxes.querySelectorAll("input[data-column-label]:checked")]
+                    .map((columnCheckbox) => columnCheckbox.dataset.columnLabel)
+            );
+        }
+
+        function showSelectedImagingRunColumns() {
+            const shownLabels = shownImagingRunColumnLabels();
+            for (const row of [imagingRunsHeader, ...imagingRunsBody.rows]) {
+                IMAGING_RUN_COLUMNS.forEach((column, columnIndex) => {
+                    row.cells[columnIndex].classList.toggle("d-none", !shownLabels.has(column.label));
+                });
+            }
+            positionFrozenColumns();
+        }
+
+        function toggleFrozenImagingRunColumn(columnLabel) {
+            if (!frozenImagingRunColumnLabels.delete(columnLabel)) {
+                frozenImagingRunColumnLabels.add(columnLabel);
+            }
+            localStorage.setItem(
+                FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...frozenImagingRunColumnLabels])
+            );
+            positionFrozenColumns();
+        }
+
+        function positionFrozenColumns() {
+            if (imagingRunsHeader.cells.length === 0) {
+                return;
+            }
+            const rows = [imagingRunsHeader, ...imagingRunsBody.rows];
+            const shownColumnIndexes = IMAGING_RUN_COLUMNS
+                .map((column, columnIndex) => columnIndex)
+                .filter((columnIndex) => !imagingRunsHeader.cells[columnIndex].classList.contains("d-none"));
+            const isFrozen = (columnIndex) => frozenImagingRunColumnLabels.has(IMAGING_RUN_COLUMNS[columnIndex].label);
+            let frozenColumnLeftPx = 0;
+            shownColumnIndexes.forEach((columnIndex, shownColumnPosition) => {
+                const frozen = isFrozen(columnIndex);
+                const nextShownColumnIndex = shownColumnIndexes[shownColumnPosition + 1];
+                // A frozen column after unfrozen ones scrolls with them until it reaches the frozen columns before it.
+                const edgeOfFrozenColumns = frozen && (nextShownColumnIndex === undefined || !isFrozen(nextShownColumnIndex));
+                for (const row of rows) {
+                    const cell = row.cells[columnIndex];
+                    cell.classList.toggle("frozen-column", frozen);
+                    cell.classList.toggle("last-frozen-column", edgeOfFrozenColumns);
+                    cell.style.left = frozen ? `${frozenColumnLeftPx}px` : "";
+                }
+                if (frozen) {
+                    frozenColumnLeftPx += imagingRunsHeader.cells[columnIndex].getBoundingClientRect().width;
+                }
+            });
+            for (const freezeButton of imagingRunsHeader.querySelectorAll("button[data-column-label]")) {
+                const frozen = frozenImagingRunColumnLabels.has(freezeButton.dataset.columnLabel);
+                freezeButton.setAttribute("aria-pressed", String(frozen));
+                freezeButton.title = `${frozen ? "Unfreeze" : "Freeze"} ${freezeButton.dataset.columnLabel}`;
+                freezeButton.setAttribute("aria-label", freezeButton.title);
+            }
+        }
+
+        function saveAndShowSelectedImagingRunColumns() {
+            localStorage.setItem(
+                SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...shownImagingRunColumnLabels()])
+            );
+            showSelectedImagingRunColumns();
+        }
+
+        function labeledCheckbox(checkboxId, labelText, labelClassName) {
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.className = "form-check-input";
+            checkbox.id = checkboxId;
+            const label = document.createElement("label");
+            label.className = `form-check-label ${labelClassName}`;
+            label.htmlFor = checkboxId;
+            label.textContent = labelText;
+            const checkboxWrapper = document.createElement("div");
+            checkboxWrapper.className = "form-check mb-0";
+            checkboxWrapper.append(checkbox, label);
+            return { checkbox, checkboxWrapper };
+        }
+
+        function showColumnGroupCheckboxState(columnGroupCheckbox, columnCheckboxes) {
+            const checkedCount = columnCheckboxes.filter((columnCheckbox) => columnCheckbox.checked).length;
+            columnGroupCheckbox.checked = checkedCount === columnCheckboxes.length;
+            columnGroupCheckbox.indeterminate = checkedCount > 0 && checkedCount < columnCheckboxes.length;
+        }
+
+        function createImagingRunColumnCheckboxes() {
+            const savedShownLabels = savedImagingRunColumnLabels(SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY);
+            let columnIndex = 0;
+            imagingRunColumnCheckboxes.replaceChildren(...IMAGING_RUN_COLUMN_GROUPS.map((columnGroup, columnGroupIndex) => {
+                const columnGroupList = document.createElement("div");
+                const columnCheckboxes = columnGroup.columns.map((column) => {
+                    const { checkbox, checkboxWrapper } = labeledCheckbox(
+                        `imaging-run-column-${columnIndex++}`, column.label, ""
+                    );
+                    checkbox.dataset.columnLabel = column.label;
+                    checkbox.checked = savedShownLabels ? savedShownLabels.has(column.label) : column.shownByDefault;
+                    if (columnGroup.label !== null) {
+                        checkboxWrapper.classList.add("ms-3");
+                    }
+                    return { checkbox, checkboxWrapper };
+                });
+                if (columnGroup.label !== null) {
+                    const { checkbox: columnGroupCheckbox, checkboxWrapper } = labeledCheckbox(
+                        `imaging-run-column-group-${columnGroupIndex}`, columnGroup.label, "fw-semibold"
+                    );
+                    const checkboxes = columnCheckboxes.map(({ checkbox }) => checkbox);
+                    showColumnGroupCheckboxState(columnGroupCheckbox, checkboxes);
+                    columnGroupCheckbox.addEventListener("change", () => {
+                        checkboxes.forEach((checkbox) => { checkbox.checked = columnGroupCheckbox.checked; });
+                        saveAndShowSelectedImagingRunColumns();
+                    });
+                    checkboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
+                        showColumnGroupCheckboxState(columnGroupCheckbox, checkboxes);
+                    }));
+                    columnGroupList.append(checkboxWrapper);
+                }
+                for (const { checkbox, checkboxWrapper } of columnCheckboxes) {
+                    checkbox.addEventListener("change", saveAndShowSelectedImagingRunColumns);
+                    columnGroupList.append(checkboxWrapper);
+                }
+                return columnGroupList;
+            }));
+        }
+
+        function updateImagingRunCells() {
+            shownImagingRuns.forEach((imagingRun, rowIndex) => {
+                IMAGING_RUN_COLUMNS.forEach((column, columnIndex) => {
+                    imagingRunsBody.rows[rowIndex].cells[columnIndex].textContent = column.value(imagingRun);
+                });
+            });
+        }
+
         function showImagingRuns(imagingRuns) {
+            shownImagingRuns = imagingRuns;
             imagingRunsHeader.replaceChildren(...IMAGING_RUN_COLUMNS.map((column) => {
                 const headerCell = document.createElement("th");
                 headerCell.scope = "col";
-                headerCell.textContent = column.label;
+                const freezeButton = document.createElement("button");
+                freezeButton.type = "button";
+                freezeButton.className = "freeze-column-button btn btn-link p-0 ms-1 align-baseline text-decoration-none";
+                freezeButton.dataset.columnLabel = column.label;
+                freezeButton.textContent = "📌";
+                freezeButton.addEventListener("click", () => toggleFrozenImagingRunColumn(column.label));
+                headerCell.append(column.label, freezeButton);
                 return headerCell;
             }));
             imagingRunsBody.replaceChildren(...imagingRuns.map((imagingRun) => {
@@ -228,6 +533,7 @@
                 row.addEventListener("click", () => selectImagingRun(imagingRun, row));
                 return row;
             }));
+            showSelectedImagingRunColumns();
             selectedImagingRunPanel.classList.add("d-none");
             imagingRunsPanel.classList.remove("d-none");
         }
@@ -353,6 +659,19 @@
         }
 
         imagingRunQueryForm.elements.run_started_after.value = defaultRunStartedAfter();
+        createImagingRunColumnCheckboxes();
+        TABLE_FONT_SIZE_CONTROLS.forEach(setUpTableFontSizeControl);
+        // Font size changes, window resizes and new misaligned FOV counts all change column widths.
+        new ResizeObserver(positionFrozenColumns).observe(imagingRunsTable);
+        misalignedPxThresholdInput.addEventListener("input", updateImagingRunCells);
+        imagingRunQueryForm.elements.exp_lgids.addEventListener("keydown", (event) => {
+            const expLgidsInput = event.target;
+            // Tab accepts the suggestion only in an empty field, so it still moves focus otherwise.
+            if (event.key === "Tab" && !event.shiftKey && expLgidsInput.value === "") {
+                event.preventDefault();
+                expLgidsInput.value = expLgidsInput.placeholder;
+            }
+        });
         loadSelectOptions(imagingRunQueryForm.elements.microscope, "/microscopes", DEFAULT_MICROSCOPE);
         loadSelectOptions(imagingRunQueryForm.elements.exp_type, "/exp-types", DEFAULT_EXP_TYPE);
 

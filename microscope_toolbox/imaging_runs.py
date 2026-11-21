@@ -37,6 +37,13 @@ class ImagingRun(BaseModel):
     percent_well_separated_cntr: Optional[float] = Field(
         description="Hyb QC: how well separated the flower plot lobes are"
     )
+    fov_max_px_errors: List[Optional[float]] = Field(
+        description=(
+            "By FOV, the largest absolute alignment error in pixels among the channels"
+            " tracked in both axes, or null if none are. An FOV is misaligned when"
+            " this exceeds the misalignment threshold."
+        )
+    )
 
 
 IMAGING_RUNS_ADAPTER = TypeAdapter(List[ImagingRun])

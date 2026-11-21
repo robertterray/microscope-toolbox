@@ -11,7 +11,7 @@ On top of that, this repo contains a small FastAPI web app:
 - **Notebook runs**: the server runs `microscope_toolbox/notebooks/automations_qc_notebook.ipynb`
   cell by cell in a fresh kernel on a remote Jupyter Notebook 6 server (zeus2), and returns the
   executed copy rendered as HTML. An optional imaging run query (run start date, microscope, LG
-  number, run name, experiment type) replaces the notebook's
+  numbers, run name, experiment type) replaces the notebook's
   `query_params = paq.RunQueryParamsView()` cell before it runs.
 - **Imaging runs**: the notebook's runs table as JSON. The server sends the notebook's query (ported
   into `imaging_runs_in_kernel.py`) to a fresh kernel on the same Jupyter server, because that's
@@ -22,8 +22,9 @@ On top of that, this repo contains a small FastAPI web app:
   its runs table is selected, which can't work in the exported HTML.
 - **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
   runs table from `/imaging-runs`; selecting a row shows the run's metrics and its hybiscus plot.
-  "Run Notebook" runs the notebook and shows its output, including the misalignment counts and
-  alignment heatmaps the runs table doesn't have yet.
+  "Run Notebook" runs the notebook and shows its output, including the alignment heatmaps the runs
+  table doesn't have yet. The runs table counts misaligned FOVs in the browser, from each run's
+  largest alignment error per FOV, so changing the threshold doesn't rerun the query.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
