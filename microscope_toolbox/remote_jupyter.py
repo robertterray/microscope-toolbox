@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
-from urllib.parse import quote
 
 import nbformat
 import requests
@@ -142,20 +141,6 @@ class JupyterServer:
             # Notebook 6 rejects cookie-authenticated POST and DELETE requests
             # that don't echo the _xsrf cookie in this header.
             self.http.headers["X-XSRFToken"] = xsrf_token
-
-    def fetch_notebook(self, notebook_path: str) -> NotebookNode:
-        response = self.http.get(
-            f"{self.base_url}/api/contents/{quote(notebook_path)}",
-            params={"type": "notebook", "content": 1},
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-        if response.status_code == 404:
-            raise JupyterServerError(
-                f"Notebook not found on {self.base_url}: {notebook_path}"
-            )
-        response.raise_for_status()
-        contents_model: Dict[str, Any] = response.json()
-        return nbformat.from_dict(contents_model["content"])
 
     @contextmanager
     def running_kernel(

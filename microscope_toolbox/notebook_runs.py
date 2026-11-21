@@ -1,11 +1,10 @@
-"""Running the configured notebook on a remote Jupyter server."""
+"""Running this app's notebook in a kernel on a remote Jupyter server."""
 
 import os
-import posixpath
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import nbformat
 from nbconvert import HTMLExporter
@@ -17,27 +16,29 @@ from microscope_toolbox.imaging_run_query import (
 )
 from microscope_toolbox.remote_jupyter import JupyterServer
 
+NOTEBOOK_PATH = Path(__file__).parent / "notebooks" / "automations_qc_notebook.ipynb"
 JUPYTER_URL_ENV_VAR = "MICROSCOPE_TOOLBOX_JUPYTER_URL"
 JUPYTER_PASSWORD_ENV_VAR = "MICROSCOPE_TOOLBOX_JUPYTER_PASSWORD"
-NOTEBOOK_PATH_ENV_VAR = "MICROSCOPE_TOOLBOX_NOTEBOOK_PATH"
+KERNEL_DIR_ENV_VAR = "MICROSCOPE_TOOLBOX_KERNEL_DIR"
 NOTEBOOK_RUNS_DIR_ENV_VAR = "MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR"
 DEFAULT_NOTEBOOK_RUNS_DIR = "notebook_runs"
 
 
-class NotebookRunNotConfiguredError(Exception):
+class JupyterServerNotConfiguredError(Exception):
+    pass
+
+
+class KernelCodeError(Exception):
     pass
 
 
 @dataclass
-class RemoteNotebook:
+class JupyterServerSettings:
     jupyter_url: str
     jupyter_password: str
-    notebook_path: str
-    """Relative to the Jupyter server's root, as in its /notebooks/... URLs."""
-
-    @property
-    def notebook_url(self) -> str:
-        return f"{self.jupyter_url.rstrip('/')}/notebooks/{self.notebook_path}"
+    kernel_dir: str
+    """The kernel's working directory, relative to the Jupyter server's root (the
+    part after /tree/ in its URLs). The notebook was written to run there."""
 
 
 @dataclass
@@ -46,29 +47,65 @@ class ExecutedNotebook:
     cell_error: Optional[str]
 
 
-def configured_remote_notebook() -> RemoteNotebook:
+def configured_jupyter_server_settings() -> JupyterServerSettings:
     required_env_vars = [
         JUPYTER_URL_ENV_VAR,
         JUPYTER_PASSWORD_ENV_VAR,
-        NOTEBOOK_PATH_ENV_VAR,
+        KERNEL_DIR_ENV_VAR,
     ]
     missing_env_vars = [name for name in required_env_vars if not os.environ.get(name)]
     if missing_env_vars:
-        raise NotebookRunNotConfiguredError("Set " + ", ".join(missing_env_vars))
-    return RemoteNotebook(
+        raise JupyterServerNotConfiguredError("Set " + ", ".join(missing_env_vars))
+    return JupyterServerSettings(
         jupyter_url=os.environ[JUPYTER_URL_ENV_VAR],
         jupyter_password=os.environ[JUPYTER_PASSWORD_ENV_VAR],
-        notebook_path=os.environ[NOTEBOOK_PATH_ENV_VAR],
+        kernel_dir=os.environ[KERNEL_DIR_ENV_VAR],
     )
 
 
+def logged_in_jupyter_server(
+    jupyter_server_settings: JupyterServerSettings,
+) -> JupyterServer:
+    jupyter_server = JupyterServer(jupyter_server_settings.jupyter_url)
+    jupyter_server.log_in(jupyter_server_settings.jupyter_password)
+    return jupyter_server
+
+
+def read_notebook() -> NotebookNode:
+    return nbformat.read(str(NOTEBOOK_PATH), as_version=4)
+
+
+def kernel_name(notebook: NotebookNode) -> Optional[str]:
+    kernelspec_name: Optional[str] = notebook.metadata.get("kernelspec", {}).get("name")
+    return kernelspec_name
+
+
+def run_in_kernel(
+    jupyter_server_settings: JupyterServerSettings, code: str, output_mime_type: str
+) -> Any:
+    """Runs code in a fresh kernel like the notebook's, which has the database
+    access and packages this app doesn't, and returns its output of that type."""
+    jupyter_server = logged_in_jupyter_server(jupyter_server_settings)
+    with jupyter_server.running_kernel(
+        kernel_cwd=jupyter_server_settings.kernel_dir,
+        kernel_name=kernel_name(read_notebook()),
+    ) as kernel:
+        cell_execution = kernel.execute(code)
+    if cell_execution.error:
+        raise KernelCodeError(f"The code failed in the kernel: {cell_execution.error}")
+    for output in cell_execution.outputs:
+        if output_mime_type in output.get("data", {}):
+            return output.data[output_mime_type]
+    raise KernelCodeError(f"The kernel returned no {output_mime_type} output")
+
+
 def execute_notebook(
-    remote_notebook: RemoteNotebook, imaging_run_query: Optional[ImagingRunQuery]
+    jupyter_server_settings: JupyterServerSettings,
+    imaging_run_query: Optional[ImagingRunQuery],
 ) -> ExecutedNotebook:
     """Stops at the first failing cell, like papermill and Jupyter's "Run All"."""
-    jupyter_server = JupyterServer(remote_notebook.jupyter_url)
-    jupyter_server.log_in(remote_notebook.jupyter_password)
-    notebook = jupyter_server.fetch_notebook(remote_notebook.notebook_path)
+    notebook = read_notebook()
+    jupyter_server = logged_in_jupyter_server(jupyter_server_settings)
     if imaging_run_query is not None:
         write_imaging_run_query(notebook, imaging_run_query)
     code_cells = [cell for cell in notebook.cells if cell.cell_type == "code"]
@@ -76,10 +113,9 @@ def execute_notebook(
     for cell in code_cells:
         cell.outputs = []
         cell.execution_count = None
-    kernel_name: Optional[str] = notebook.metadata.get("kernelspec", {}).get("name")
     with jupyter_server.running_kernel(
-        kernel_cwd=posixpath.dirname(remote_notebook.notebook_path),
-        kernel_name=kernel_name,
+        kernel_cwd=jupyter_server_settings.kernel_dir,
+        kernel_name=kernel_name(notebook),
     ) as kernel:
         for cell in code_cells:
             cell_execution = kernel.execute(cell.source)
@@ -90,14 +126,13 @@ def execute_notebook(
     return ExecutedNotebook(notebook, cell_error=None)
 
 
-def save_executed_notebook(notebook: NotebookNode, notebook_path: str) -> Path:
+def save_executed_notebook(notebook: NotebookNode) -> Path:
     runs_dir = Path(
         os.environ.get(NOTEBOOK_RUNS_DIR_ENV_VAR, DEFAULT_NOTEBOOK_RUNS_DIR)
     )
     runs_dir.mkdir(parents=True, exist_ok=True)
     started_at = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    notebook_stem = Path(notebook_path).stem
-    executed_notebook_path = runs_dir / f"{notebook_stem}-{started_at}.ipynb"
+    executed_notebook_path = runs_dir / f"{NOTEBOOK_PATH.stem}-{started_at}.ipynb"
     nbformat.write(notebook, str(executed_notebook_path))
     return executed_notebook_path
 

@@ -8,28 +8,47 @@ AWS CodeBuild `buildspec.yml`. See `README.md` for build and publish details.
 
 On top of that, this repo contains a small FastAPI web app:
 
-- **Notebook runs**: the server runs a notebook on a remote Jupyter Notebook 6 server (zeus2) in a
-  fresh kernel there, and returns the executed copy rendered as HTML. An optional imaging run query
-  (run start date, microscope, LG number, run name, experiment type) replaces the notebook's
-  `query_params = paq.RunQueryParamsView()` cell before it runs. The configured notebook is
-  `automations_qc_notebook-microscope_toolbox_version.ipynb` from terray_notebooks.
-- **Web page**: a single static page with an imaging run query form that runs the notebook and shows
-  its output.
+- **Notebook runs**: the server runs `microscope_toolbox/notebooks/automations_qc_notebook.ipynb`
+  cell by cell in a fresh kernel on a remote Jupyter Notebook 6 server (zeus2), and returns the
+  executed copy rendered as HTML. An optional imaging run query (run start date, microscope, LG
+  number, run name, experiment type) replaces the notebook's
+  `query_params = paq.RunQueryParamsView()` cell before it runs.
+- **Imaging runs**: the notebook's runs table as JSON. The server sends the notebook's query (ported
+  into `imaging_runs_in_kernel.py`) to a fresh kernel on the same Jupyter server, because that's
+  where the database access and terray packages are. Later this should query the database directly,
+  once the app has its own database access.
+- **Hybiscus plots**: a photometry's hybiscus plot and per-channel histograms as a PNG, drawn in a
+  kernel on the Jupyter server (`hybiscus_plots_in_kernel.py`). The notebook draws it when a row of
+  its runs table is selected, which can't work in the exported HTML.
+- **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
+  runs table from `/imaging-runs`; selecting a row shows the run's metrics and its hybiscus plot.
+  "Run Notebook" runs the notebook and shows its output, including the misalignment counts and
+  alignment heatmaps the runs table doesn't have yet.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
 ## Layout
 
 - `microscope_toolbox/api.py`: FastAPI app, holding all routes and Pydantic models.
-- `microscope_toolbox/notebook_runs.py`: notebook run configuration, cell-by-cell execution, saving
-  and HTML rendering.
+- `microscope_toolbox/notebook_runs.py`: Jupyter server configuration, `run_in_kernel` (runs code in
+  a fresh kernel and returns one output), and the notebook's cell-by-cell execution, saving and HTML
+  rendering.
 - `microscope_toolbox/imaging_run_query.py`: the imaging run query model and the code it writes into
   the notebook's `query_params` cell.
+- `microscope_toolbox/imaging_runs.py`: the `ImagingRun` response model, and running the imaging
+  runs query in a kernel on the Jupyter server.
+- `microscope_toolbox/imaging_runs_in_kernel.py`: the imaging runs query itself, whose source is sent
+  to the kernel.
+- `microscope_toolbox/hybiscus_plots.py` and `hybiscus_plots_in_kernel.py`: the same split for the
+  hybiscus plot.
 - `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
-  contents API, sessions API and the kernel websocket.
+  sessions API and the kernel websocket.
+- `microscope_toolbox/notebooks/automations_qc_notebook.ipynb`: the notebook the app runs (see
+  Conventions and gotchas).
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
   build step. `vendor/` holds a local copy of Bootstrap 5.3.3 CSS, so the page works offline.
-- `tests/`: pytest suite (`test_api.py`, `test_imaging_run_query.py`, `test_remote_jupyter.py`).
+- `tests/`: pytest suite (`test_api.py`, `test_hybiscus_plots_in_kernel.py`,
+  `test_imaging_run_query.py`, `test_imaging_runs_in_kernel.py`, `test_remote_jupyter.py`).
 
 ## API
 
@@ -38,7 +57,9 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/health` | Liveness check |
 | GET | `/microscopes` | Microscopes an imaging run query can restrict to |
 | GET | `/exp-types` | Experiment types an imaging run query can restrict to |
-| POST | `/notebook-runs` | Run the configured notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `query_params` cell |
+| POST | `/notebook-runs` | Run the automations QC notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `query_params` cell |
+| GET | `/imaging-runs` | Imaging runs matching an imaging run query (query parameters), with their alignment and QC scores (blocks); 422 for an empty or unsafe query, 502 if the Jupyter server or the query fails |
+| GET | `/photometries/{phot_id}/hybiscus-plot` | The photometry's hybiscus plot and histograms as a PNG (blocks, about 20 s); 422 for an invalid `phot_id`, 502 if the Jupyter server or the plotting fails |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
@@ -96,10 +117,18 @@ A reader should be able to follow the code from its names alone, without comment
   bad names (e.g. `l`), but naming quality is still mostly on you (see Readability).
 - Add dependencies to `pyproject.toml` in both `dependencies` (a version range) and the `pinned`
   extra (an exact version). Dev-only tools go in `dev`.
-- Notebook runs are configured by `MICROSCOPE_TOOLBOX_JUPYTER_URL`, `MICROSCOPE_TOOLBOX_JUPYTER_PASSWORD`
-  and `MICROSCOPE_TOOLBOX_NOTEBOOK_PATH` (relative to the Jupyter server's root, i.e. the part after
-  `/notebooks/` in its URL). Executed copies are saved locally in `MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR`
-  (default `notebook_runs/`, gitignored); the notebook on the server is never modified.
+- The Jupyter server is configured by `MICROSCOPE_TOOLBOX_JUPYTER_URL`,
+  `MICROSCOPE_TOOLBOX_JUPYTER_PASSWORD` and `MICROSCOPE_TOOLBOX_KERNEL_DIR`, the kernel's working
+  directory relative to the server's root (the part after `/tree/` in its URLs). Use
+  `jupyter-share/common/terray_notebooks/terray_notebooks/notebooks`, where the original notebook
+  lives. Executed copies are saved locally in `MICROSCOPE_TOOLBOX_NOTEBOOK_RUNS_DIR` (default
+  `notebook_runs/`, gitignored). Nothing is written to the Jupyter server.
+- `notebooks/automations_qc_notebook.ipynb` is terray_notebooks' notebook at 48c8e75 with three
+  fixes, outputs cleared and a `python3` kernelspec added: the latest alignment and photometry per
+  run (cell "Query the databases"), `run_dur` as float (cell "Columns to Keep") and a fallback for
+  `runs_table.filtered_df` (last cell). Keep it otherwise identical to the original, so it can be
+  compared and updated, and send the fixes upstream. ruff and black exclude it: they would remove
+  "unused" imports such as `datetime`, which the `query_params` cell the app writes uses.
 - The microscope and experiment type lists are `Microscope` and `ExpType` in `imaging_run_query.py`;
   the page's dropdowns load them from `/microscopes` and `/exp-types`. `ExpType` leaves out
   misspelled and retired values found in the database (`deccode`, `chemqc`, `aborted`, ...). The
@@ -114,9 +143,26 @@ A reader should be able to follow the code from its names alone, without comment
 - The notebook signals "no runs match" only through the text of its `ValueError`s, so
   `NO_MATCHING_IMAGING_RUNS_ERRORS` in `imaging_run_query.py` must follow any change to those
   messages in the notebook.
-- The kernel runs on the Jupyter server with the notebook's folder as working directory, so the
-  notebook uses the server's packages and data paths, not this venv's.
+- The `*_in_kernel.py` modules run in the Jupyter server's kernel, not in this app: their source is
+  sent with `inspect.getsource`. Import DataJoint, terray packages, matplotlib, numpy and pandas only
+  inside their functions, and keep their syntax to what the server's Python supports. numpy and
+  pandas are dev-only dependencies, for their tests. Results come back as Jupyter outputs:
+  `IPython.display.JSON` (values `json.dumps(..., allow_nan=False)` accepts) or `Image` (base64 PNG).
+  Code that queries DataJoint with ids it fetched must call `np.set_printoptions(legacy="1.25")`
+  first, like the notebook, or numpy 2 writes `np.int64(5)` into the SQL.
+- The imaging runs query copies the notebook's semantics, including that every run must have a
+  `microscope`, `spotted` and `exp_type` run property even when the query doesn't restrict it.
+  Like the fixed notebook, it pairs each run's `latest` alignment with its `latest` photometry, one
+  row per run. Photometries are tagged per run, not per alignment, so the original notebook pairs
+  every alignment with every photometry, and its pivot fails ("Index contains duplicate entries")
+  for a run with more than one.
+- uv reads the private AWS CodeArtifact index from `pyproject.toml`. Without AWS credentials,
+  install public packages with `uv pip install --python .venv/bin/python ...` from outside the repo.
+- The kernel runs on the Jupyter server in `MICROSCOPE_TOOLBOX_KERNEL_DIR`, so the notebook uses the
+  server's packages and data paths, not this venv's.
 - Tests must not use the network or start a Jupyter kernel. Mock
   `notebook_runs.JupyterServer` via `monkeypatch`, as in `test_api.py`; `test_remote_jupyter.py`
-  scripts kernel messages with a fake websocket.
-- New static files are packaged automatically via `MANIFEST.in` (`recursive-include ... static *`).
+  scripts kernel messages with a fake websocket; `test_imaging_runs_in_kernel.py` runs the query
+  against an in-memory fake of the DataJoint tables.
+- New static files and notebooks are packaged automatically via `MANIFEST.in`
+  (`recursive-include ... static *`, `recursive-include ... notebooks *.ipynb`).

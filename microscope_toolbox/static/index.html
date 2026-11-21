@@ -3,14 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Run Notebook</title>
+    <title>Automations QC</title>
     <link rel="stylesheet" href="/vendor/bootstrap-5.3.3.min.css">
 </head>
 <body class="bg-body-tertiary">
     <div class="container py-5" style="max-width: 540px;">
         <div class="card shadow-sm">
             <div class="card-body">
-                <h1 class="h3 card-title mb-3">Run Notebook</h1>
+                <h1 class="h3 card-title mb-3">Automations QC</h1>
                 <form id="imaging-run-query-form">
                     <p class="text-body-secondary small">Select imaging runs. Leave a field empty to skip that restriction.</p>
                     <div class="mb-3">
@@ -39,14 +39,51 @@
                             <option value="">Any experiment type</option>
                         </select>
                     </div>
-                    <button id="run-notebook-button" type="submit" class="btn btn-primary">
-                        <span id="run-notebook-spinner" class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
-                        Run
+                    <button id="show-imaging-runs-button" type="submit" class="btn btn-primary">
+                        <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+                        Show Imaging Runs
                     </button>
+                    <button id="run-notebook-button" type="submit" class="btn btn-outline-secondary">
+                        <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
+                        Run Notebook
+                    </button>
+                    <div class="form-text">Run Notebook also counts misaligned FOVs and draws the alignment heatmaps, but its table rows can't be selected.</div>
                 </form>
-                <div id="notebook-run-alert" class="alert mt-3 mb-0 d-none" role="alert">
-                    <div id="notebook-run-alert-title" class="fw-semibold"></div>
-                    <pre id="notebook-run-alert-body" class="mb-0 mt-2 small text-wrap"></pre>
+                <div id="query-alert" class="alert mt-3 mb-0 d-none" role="alert">
+                    <div id="query-alert-title" class="fw-semibold"></div>
+                    <pre id="query-alert-body" class="mb-0 mt-2 small text-wrap"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid pb-5 d-none" id="imaging-runs-panel">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 card-title">Imaging runs</h2>
+                <p class="text-body-secondary small">Select a row to view the hybiscus plot and accompanying histograms. Drawing one takes about 20 seconds.</p>
+                <div class="table-responsive" style="max-height: 50vh;">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr id="imaging-runs-header"></tr>
+                        </thead>
+                        <tbody id="imaging-runs-body" style="cursor: pointer;"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mt-3 d-none" id="selected-imaging-run-panel">
+            <div class="card-body">
+                <h2 class="h5 card-title" id="selected-imaging-run-title"></h2>
+                <div class="row g-3">
+                    <div class="col-lg-8">
+                        <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
+                        <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
+                    </div>
+                    <div class="col-lg-4">
+                        <dl id="selected-imaging-run-metrics" class="row small mb-0"></dl>
+                    </div>
                 </div>
             </div>
         </div>
@@ -62,24 +99,50 @@
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
         const DEFAULT_MICROSCOPE = "TigerS4";
         const DEFAULT_EXP_TYPE = "automation-qc";
+        const WELL_WATCHER_FOV_METRICS_URL = "https://well-watcher.app.terraytx.com/FOV_Metrics?rawimg_id=";
+        const IMAGING_RUN_COLUMNS = [
+            { label: "Run start", value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
+            { label: "Run name", value: (imagingRun) => imagingRun.run_name },
+            { label: "LG number", value: (imagingRun) => imagingRun.exp_lgid },
+            { label: "Microscope", value: (imagingRun) => imagingRun.microscope },
+            { label: "Experiment type", value: (imagingRun) => imagingRun.exp_type },
+            { label: "Spotted", value: (imagingRun) => imagingRun.spotted },
+            { label: "Focus 405", value: (imagingRun) => formatScore(imagingRun.median_focus_score_405, 3) },
+            { label: "Focus 458", value: (imagingRun) => formatScore(imagingRun.median_focus_score_458, 3) },
+            { label: "AF458 intensity", value: (imagingRun) => formatScore(imagingRun.filled_p875_intensities.AF458, 1) },
+            { label: "% well separated", value: (imagingRun) => formatScore(imagingRun.percent_well_separated_cntr, 1) },
+        ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
-        const runNotebookButton = document.getElementById("run-notebook-button");
-        const runNotebookSpinner = document.getElementById("run-notebook-spinner");
-        const notebookRunAlert = document.getElementById("notebook-run-alert");
-        const notebookRunAlertTitle = document.getElementById("notebook-run-alert-title");
-        const notebookRunAlertBody = document.getElementById("notebook-run-alert-body");
+        const queryButtons = [
+            document.getElementById("show-imaging-runs-button"),
+            document.getElementById("run-notebook-button"),
+        ];
+        const queryAlert = document.getElementById("query-alert");
+        const queryAlertTitle = document.getElementById("query-alert-title");
+        const queryAlertBody = document.getElementById("query-alert-body");
+        const imagingRunsPanel = document.getElementById("imaging-runs-panel");
+        const imagingRunsHeader = document.getElementById("imaging-runs-header");
+        const imagingRunsBody = document.getElementById("imaging-runs-body");
+        const selectedImagingRunPanel = document.getElementById("selected-imaging-run-panel");
+        const selectedImagingRunTitle = document.getElementById("selected-imaging-run-title");
+        const selectedImagingRunMetrics = document.getElementById("selected-imaging-run-metrics");
+        const hybiscusPlotStatus = document.getElementById("hybiscus-plot-status");
+        const hybiscusPlot = document.getElementById("hybiscus-plot");
         const executedNotebookPanel = document.getElementById("executed-notebook-panel");
         const executedNotebook = document.getElementById("executed-notebook");
+        // A photometry's plot never changes, so each one is drawn at most once per page load.
+        const hybiscusPlotUrls = new Map();
+        let selectedPhotId = null;
 
-        function showNotebookRunAlert(variant, title, message) {
-            notebookRunAlert.className = `alert alert-${variant} mt-3 mb-0`;
-            notebookRunAlertTitle.textContent = title;
-            notebookRunAlertBody.textContent = message;
+        function showQueryAlert(variant, title, message) {
+            queryAlert.className = `alert alert-${variant} mt-3 mb-0`;
+            queryAlertTitle.textContent = title;
+            queryAlertBody.textContent = message;
         }
 
         function imagingRunQueryDescription() {
             return IMAGING_RUN_QUERY_FIELDS
-                .map((field) => imagingRunQueryForm[field])
+                .map((field) => imagingRunQueryForm.elements[field])
                 .filter((input) => input.value.trim())
                 .map((input) => {
                     const label = document.querySelector(`label[for="${input.id}"]`).textContent;
@@ -88,9 +151,8 @@
                 .join("\n");
         }
 
-        function showExecutedNotebook(notebookHtml) {
-            executedNotebook.srcdoc = notebookHtml;
-            executedNotebookPanel.classList.remove("d-none");
+        function formatScore(score, fractionDigits) {
+            return score === null || score === undefined ? "–" : score.toFixed(fractionDigits);
         }
 
         function defaultRunStartedAfter() {
@@ -103,9 +165,16 @@
         function imagingRunQueryFromForm() {
             const imagingRunQuery = {};
             for (const field of IMAGING_RUN_QUERY_FIELDS) {
-                imagingRunQuery[field] = imagingRunQueryForm[field].value.trim() || null;
+                imagingRunQuery[field] = imagingRunQueryForm.elements[field].value.trim() || null;
             }
             return imagingRunQuery;
+        }
+
+        function imagingRunQueryParameters() {
+            const imagingRunQuery = imagingRunQueryFromForm();
+            return new URLSearchParams(
+                Object.entries(imagingRunQuery).filter(([, value]) => value !== null)
+            );
         }
 
         function errorDetailText(errorDetail) {
@@ -118,6 +187,15 @@
             return typeof errorDetail === "string" ? errorDetail : JSON.stringify(errorDetail);
         }
 
+        async function responseErrorText(response) {
+            try {
+                const errorBody = await response.json();
+                return errorDetailText(errorBody.detail ?? errorBody);
+            } catch {
+                return response.statusText;
+            }
+        }
+
         async function loadSelectOptions(select, url, defaultValue) {
             try {
                 const response = await fetch(url);
@@ -128,43 +206,176 @@
                 select.append(...optionValues.map((optionValue) => new Option(optionValue, optionValue)));
                 select.value = defaultValue;
             } catch (error) {
-                showNotebookRunAlert("danger", "Could not load " + url, String(error));
+                showQueryAlert("danger", "Could not load " + url, String(error));
             }
         }
 
-        imagingRunQueryForm.run_started_after.value = defaultRunStartedAfter();
-        loadSelectOptions(imagingRunQueryForm.microscope, "/microscopes", DEFAULT_MICROSCOPE);
-        loadSelectOptions(imagingRunQueryForm.exp_type, "/exp-types", DEFAULT_EXP_TYPE);
+        function showImagingRuns(imagingRuns) {
+            imagingRunsHeader.replaceChildren(...IMAGING_RUN_COLUMNS.map((column) => {
+                const headerCell = document.createElement("th");
+                headerCell.scope = "col";
+                headerCell.textContent = column.label;
+                return headerCell;
+            }));
+            imagingRunsBody.replaceChildren(...imagingRuns.map((imagingRun) => {
+                const row = document.createElement("tr");
+                row.dataset.photId = imagingRun.phot_id;
+                for (const column of IMAGING_RUN_COLUMNS) {
+                    const cell = document.createElement("td");
+                    cell.textContent = column.value(imagingRun);
+                    row.append(cell);
+                }
+                row.addEventListener("click", () => selectImagingRun(imagingRun, row));
+                return row;
+            }));
+            selectedImagingRunPanel.classList.add("d-none");
+            imagingRunsPanel.classList.remove("d-none");
+        }
+
+        function selectedImagingRunMetricEntries(imagingRun) {
+            return [
+                ["Raw image ID", imagingRun.rawimg_id],
+                ["Alignment ID", imagingRun.align_id],
+                ["Photometry ID", imagingRun.phot_id],
+                ["Imaging duration", `${formatScore(imagingRun.run_dur, 0)} s`],
+                ["Experiment", imagingRun.exp_title],
+                ["Owner", imagingRun.exp_owner],
+                ["Focus 405", formatScore(imagingRun.median_focus_score_405, 3)],
+                ["Focus 458", formatScore(imagingRun.median_focus_score_458, 3)],
+                ["% well separated", formatScore(imagingRun.percent_well_separated_cntr, 1)],
+                ...Object.entries(imagingRun.filled_p875_intensities)
+                    .map(([channel, intensity]) => [`${channel} intensity`, formatScore(intensity, 1)]),
+                ...Object.entries(imagingRun.vignette_scores)
+                    .map(([channel, score]) => [`${channel} vignette score`, formatScore(score, 3)]),
+            ];
+        }
+
+        function showSelectedImagingRunMetrics(imagingRun) {
+            selectedImagingRunMetrics.replaceChildren();
+            for (const [label, value] of selectedImagingRunMetricEntries(imagingRun)) {
+                const term = document.createElement("dt");
+                term.className = "col-6 fw-normal text-body-secondary";
+                term.textContent = label;
+                const description = document.createElement("dd");
+                description.className = "col-6 mb-1";
+                description.textContent = value ?? "–";
+                selectedImagingRunMetrics.append(term, description);
+            }
+            const wellWatcherLink = document.createElement("a");
+            wellWatcherLink.href = WELL_WATCHER_FOV_METRICS_URL + encodeURIComponent(imagingRun.rawimg_id);
+            wellWatcherLink.target = "_blank";
+            wellWatcherLink.rel = "noopener";
+            wellWatcherLink.textContent = "Open in Well Watcher";
+            const linkItem = document.createElement("dd");
+            linkItem.className = "col-12 mt-2";
+            linkItem.append(wellWatcherLink);
+            selectedImagingRunMetrics.append(linkItem);
+        }
+
+        async function hybiscusPlotUrl(photId) {
+            if (!hybiscusPlotUrls.has(photId)) {
+                const response = await fetch(`/photometries/${encodeURIComponent(photId)}/hybiscus-plot`);
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: ${await responseErrorText(response)}`);
+                }
+                hybiscusPlotUrls.set(photId, URL.createObjectURL(await response.blob()));
+            }
+            return hybiscusPlotUrls.get(photId);
+        }
+
+        async function selectImagingRun(imagingRun, row) {
+            for (const otherRow of imagingRunsBody.rows) {
+                otherRow.classList.toggle("table-active", otherRow === row);
+            }
+            selectedPhotId = imagingRun.phot_id;
+            selectedImagingRunTitle.textContent = imagingRun.run_name;
+            showSelectedImagingRunMetrics(imagingRun);
+            selectedImagingRunPanel.classList.remove("d-none");
+            hybiscusPlot.classList.add("d-none");
+            hybiscusPlotStatus.className = "text-body-secondary small mb-2";
+            hybiscusPlotStatus.textContent = "Drawing the hybiscus plot…";
+            try {
+                const plotUrl = await hybiscusPlotUrl(imagingRun.phot_id);
+                // Another row may have been selected while this plot was drawn.
+                if (selectedPhotId === imagingRun.phot_id) {
+                    hybiscusPlot.src = plotUrl;
+                    hybiscusPlot.classList.remove("d-none");
+                    hybiscusPlotStatus.textContent = "";
+                }
+            } catch (error) {
+                if (selectedPhotId === imagingRun.phot_id) {
+                    hybiscusPlotStatus.className = "text-danger small mb-2";
+                    hybiscusPlotStatus.textContent = "Could not draw the hybiscus plot. " + String(error.message ?? error);
+                }
+            }
+        }
+
+        function showExecutedNotebook(notebookHtml) {
+            executedNotebook.srcdoc = notebookHtml;
+            executedNotebookPanel.classList.remove("d-none");
+        }
+
+        async function showImagingRunsMatchingForm() {
+            showQueryAlert("secondary", "Finding imaging runs…", "");
+            const response = await fetch("/imaging-runs?" + imagingRunQueryParameters());
+            if (!response.ok) {
+                showQueryAlert("danger", "Error " + response.status, await responseErrorText(response));
+                return;
+            }
+            const imagingRuns = await response.json();
+            if (imagingRuns.length === 0) {
+                showQueryAlert("warning", "No imaging runs match", imagingRunQueryDescription());
+                return;
+            }
+            showQueryAlert("success", `${imagingRuns.length} imaging runs`, "");
+            showImagingRuns(imagingRuns);
+        }
+
+        async function runNotebookWithForm() {
+            showQueryAlert("secondary", "Running the notebook…", "");
+            const response = await fetch("/notebook-runs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(imagingRunQueryFromForm()),
+            });
+            const notebookRun = await response.json();
+            if (!response.ok) {
+                showQueryAlert("danger", "Error " + response.status, errorDetailText(notebookRun.detail ?? notebookRun));
+            } else if (notebookRun.no_matching_imaging_runs) {
+                showQueryAlert("warning", "No imaging runs match", imagingRunQueryDescription());
+            } else if (notebookRun.succeeded) {
+                showQueryAlert("success", "Finished", notebookRun.executed_notebook_path);
+                showExecutedNotebook(notebookRun.html);
+            } else {
+                showQueryAlert("danger", "A cell failed", notebookRun.error);
+                showExecutedNotebook(notebookRun.html);
+            }
+        }
+
+        imagingRunQueryForm.elements.run_started_after.value = defaultRunStartedAfter();
+        loadSelectOptions(imagingRunQueryForm.elements.microscope, "/microscopes", DEFAULT_MICROSCOPE);
+        loadSelectOptions(imagingRunQueryForm.elements.exp_type, "/exp-types", DEFAULT_EXP_TYPE);
 
         imagingRunQueryForm.addEventListener("submit", async (event) => {
             event.preventDefault();
-            runNotebookButton.disabled = true;
-            runNotebookSpinner.classList.remove("d-none");
-            showNotebookRunAlert("secondary", "Running…", "");
+            // Enter in a field submits with the first button, Show Imaging Runs.
+            const clickedButton = event.submitter ?? queryButtons[0];
+            const clickedButtonSpinner = clickedButton.querySelector(".spinner-border");
+            queryButtons.forEach((button) => { button.disabled = true; });
+            clickedButtonSpinner.classList.remove("d-none");
+            imagingRunsPanel.classList.add("d-none");
             executedNotebookPanel.classList.add("d-none");
             try {
-                const response = await fetch("/notebook-runs", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(imagingRunQueryFromForm()),
-                });
-                const notebookRun = await response.json();
-                if (!response.ok) {
-                    showNotebookRunAlert("danger", "Error " + response.status, errorDetailText(notebookRun.detail ?? notebookRun));
-                } else if (notebookRun.no_matching_imaging_runs) {
-                    showNotebookRunAlert("warning", "No imaging runs match", imagingRunQueryDescription());
-                } else if (notebookRun.succeeded) {
-                    showNotebookRunAlert("success", "Finished", notebookRun.executed_notebook_path);
-                    showExecutedNotebook(notebookRun.html);
+                if (clickedButton.id === "run-notebook-button") {
+                    await runNotebookWithForm();
                 } else {
-                    showNotebookRunAlert("danger", "A cell failed", notebookRun.error);
-                    showExecutedNotebook(notebookRun.html);
+                    await showImagingRunsMatchingForm();
                 }
             } catch (error) {
-                showNotebookRunAlert("danger", "Request failed", String(error));
+                showQueryAlert("danger", "Request failed", String(error));
             } finally {
-                runNotebookButton.disabled = false;
-                runNotebookSpinner.classList.add("d-none");
+                queryButtons.forEach((button) => { button.disabled = false; });
+                clickedButtonSpinner.classList.add("d-none");
             }
         });
     </script>
