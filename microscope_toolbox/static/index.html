@@ -6,9 +6,10 @@
     <title>Automations QC</title>
     <link rel="stylesheet" href="/vendor/bootstrap-5.3.3.min.css">
     <style>
-        #imaging-runs-table th { font-size: var(--imaging-runs-header-font-size, 16px); }
+        #imaging-runs-table th { font-size: var(--imaging-runs-header-font-size, 14px); }
         #imaging-runs-table td { font-size: var(--imaging-runs-cell-font-size, 16px); }
         #imaging-runs-table .frozen-column { position: sticky; z-index: 1; }
+        #px-error-color-scale { width: 12rem; height: 0.75rem; }
         .freeze-column-button { font-size: 0.8em; line-height: 1; opacity: 0.25; }
         .freeze-column-button:hover, .freeze-column-button[aria-pressed="true"] { opacity: 1; }
         /* A border on a sticky cell stays behind when the table scrolls, so the edge is drawn inside the cell. */
@@ -64,7 +65,7 @@
                         <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
                         Run Notebook
                     </button>
-                    <div class="form-text">Run Notebook also draws the alignment heatmaps, but its table rows can't be selected.</div>
+                    <div class="form-text">Run Notebook also draws the total alignment error across runs, but its table rows can't be selected.</div>
                 </form>
                 <div id="query-alert" class="alert mt-3 mb-0 d-none" role="alert">
                     <div id="query-alert-title" class="fw-semibold"></div>
@@ -78,7 +79,7 @@
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="h5 card-title">Imaging runs</h2>
-                <p class="text-body-secondary small">Select a row to view the hybiscus plot and accompanying histograms. Drawing one takes about 20 seconds.</p>
+                <p class="text-body-secondary small">Select a row to view its alignment heatmaps, hybiscus plot and histograms. Drawing a hybiscus plot takes about 20 seconds.</p>
                 <div class="d-flex align-items-center gap-2 small mb-2">
                     <label for="misaligned-px-threshold" class="form-label mb-0">Misalignment threshold (px)</label>
                     <input id="misaligned-px-threshold" type="number" min="0" step="0.5" value="3" class="form-control form-control-sm" style="width: 6rem;">
@@ -116,15 +117,36 @@
         <div class="card shadow-sm mt-3 d-none" id="selected-imaging-run-panel">
             <div class="card-body">
                 <h2 class="h5 card-title" id="selected-imaging-run-title"></h2>
-                <div class="row g-3">
-                    <div class="col-lg-8">
-                        <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
-                        <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
+                <details class="mb-3" open>
+                    <summary class="h6">Alignment pixel errors</summary>
+                    <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
+                        <span>Each block is an FOV, placed as on the chip. Hover over one for its number and errors.</span>
+                        <span>≤ −3 px</span>
+                        <span id="px-error-color-scale" class="rounded border"></span>
+                        <span>≥ 3 px</span>
+                        <span>Gray: not measured.</span>
+                        <div class="input-group input-group-sm w-auto ms-auto">
+                            <span class="input-group-text">Block size</span>
+                            <button id="heatmap-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller heatmap blocks">−</button>
+                            <output id="heatmap-fov-size" class="input-group-text"></output>
+                            <button id="heatmap-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger heatmap blocks">+</button>
+                        </div>
                     </div>
-                    <div class="col-lg-4">
-                        <dl id="selected-imaging-run-metrics" class="row small mb-0"></dl>
+                    <div id="alignment-heatmaps-status" class="text-body-secondary small mb-2"></div>
+                    <div id="alignment-heatmaps" class="d-flex flex-wrap column-gap-5 row-gap-3"></div>
+                </details>
+                <details open>
+                    <summary class="h6">Hybiscus plot and metrics</summary>
+                    <div class="row g-3">
+                        <div class="col-lg-8">
+                            <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
+                            <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
+                        </div>
+                        <div class="col-lg-4">
+                            <dl id="selected-imaging-run-metrics" class="row small mb-0"></dl>
+                        </div>
                     </div>
-                </div>
+                </details>
             </div>
         </div>
     </div>
@@ -137,19 +159,23 @@
     <script>
         const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgids", "run_name_contains", "exp_type"];
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
-        const DEFAULT_MICROSCOPE = "TigerS4";
-        const DEFAULT_EXP_TYPE = "automation-qc";
         const WELL_WATCHER_FOV_METRICS_URL = "https://well-watcher.app.terraytx.com/FOV_Metrics?rawimg_id=";
         const CHANNELS = ["AF405", "AF458", "AF568", "AF633", "AF750"];
+        const ALIGNMENT_AXES = [{ name: "vert", label: "Vertical" }, { name: "horz", label: "Horizontal" }];
+        // The notebook's heatmaps use Vega's "redblue" scheme over -3 to 3 px, clamping larger errors.
+        const PX_ERROR_COLOR_LIMIT = 3;
+        const PX_ERROR_COLORS = ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"];
+        const UNMEASURED_PX_ERROR_COLOR = "#adb5bd";
+        const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
         const IMAGING_RUN_COLUMN_GROUPS = [
             {
                 label: "Run Details",
                 columns: [
-                    { label: "Run start", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
-                    { label: "Run name", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).runNameWithoutChip },
-                    { label: "LG number", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => imagingRun.exp_lgid },
-                    { label: "Chip", shownByDefault: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).chip ?? "–" },
-                    { label: "Microscope", shownByDefault: true, value: (imagingRun) => imagingRun.microscope },
+                    { label: "Run start", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
+                    { label: "Run name", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).runNameWithoutChip },
+                    { label: "LG number", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.exp_lgid },
+                    { label: "Chip", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).chip ?? "–", link: wellWatcherFovMetricsUrl },
+                    { label: "Microscope", shownByDefault: true, freezable: true, value: (imagingRun) => imagingRun.microscope },
                     { label: "Duration (s)", shownByDefault: false, value: (imagingRun) => formatScore(imagingRun.run_dur, 0) },
                     { label: "Experiment", shownByDefault: false, value: (imagingRun) => imagingRun.exp_title },
                     { label: "Owner", shownByDefault: false, value: (imagingRun) => imagingRun.exp_owner },
@@ -202,12 +228,11 @@
         const FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY = "frozenImagingRunColumns";
         // Run names end in "Chip<number>", usually after a slash, as in "SN8689-AA/Chip1".
         const RUN_NAME_WITH_CHIP = /^(.*?)[\s\/_-]*chip\s*(\d+)$/i;
-        const DEFAULT_TABLE_FONT_SIZE_PX = 16;
-        const MIN_TABLE_FONT_SIZE_PX = 8;
-        const MAX_TABLE_FONT_SIZE_PX = 32;
-        const TABLE_FONT_SIZE_CONTROLS = [
-            { name: "header", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx" },
-            { name: "cell", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx" },
+        const TABLE_FONT_SIZE_LIMITS_PX = { min: 8, max: 32 };
+        const SIZE_CONTROLS = [
+            { name: "header-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx", defaultSizePx: 14, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
+            { name: "cell-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx", defaultSizePx: 16, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
+            { name: "heatmap-fov", sizedElementId: "alignment-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "heatmapFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 4, max: 30 } },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
         const queryButtons = [
@@ -228,14 +253,24 @@
         const selectedImagingRunMetrics = document.getElementById("selected-imaging-run-metrics");
         const hybiscusPlotStatus = document.getElementById("hybiscus-plot-status");
         const hybiscusPlot = document.getElementById("hybiscus-plot");
+        const alignmentHeatmapsStatus = document.getElementById("alignment-heatmaps-status");
+        const alignmentHeatmaps = document.getElementById("alignment-heatmaps");
         const executedNotebookPanel = document.getElementById("executed-notebook-panel");
         const executedNotebook = document.getElementById("executed-notebook");
         // A photometry's plot never changes, so each one is drawn at most once per page load.
         const hybiscusPlotUrls = new Map();
-        let selectedPhotId = null;
+        const alignmentPixelErrorsByAlignId = new Map();
+        let selectedImagingRun = null;
         let shownImagingRuns = [];
-        const frozenImagingRunColumnLabels = savedImagingRunColumnLabels(FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY)
-            ?? new Set(IMAGING_RUN_COLUMNS.filter((column) => column.frozenByDefault).map((column) => column.label));
+        const freezableImagingRunColumnLabels = new Set(
+            IMAGING_RUN_COLUMNS.filter((column) => column.freezable).map((column) => column.label)
+        );
+        // Earlier versions of the page let any column be frozen, and saved those too.
+        const frozenImagingRunColumnLabels = new Set(
+            [...(savedImagingRunColumnLabels(FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY)
+                ?? IMAGING_RUN_COLUMNS.filter((column) => column.frozenByDefault).map((column) => column.label))]
+                .filter((columnLabel) => freezableImagingRunColumnLabels.has(columnLabel))
+        );
 
         function showQueryAlert(variant, title, message) {
             queryAlert.className = `alert alert-${variant} mt-3 mb-0`;
@@ -272,24 +307,29 @@
             return { runNameWithoutChip: runNameWithChip[1], chip: Number(runNameWithChip[2]) };
         }
 
-        function setUpTableFontSizeControl(tableFontSizeControl) {
-            const fontSizeOutput = document.getElementById(`${tableFontSizeControl.name}-font-size`);
-            const decreaseButton = document.getElementById(`${tableFontSizeControl.name}-font-size-decrease`);
-            const increaseButton = document.getElementById(`${tableFontSizeControl.name}-font-size-increase`);
-            const savedFontSizePx = Number(localStorage.getItem(tableFontSizeControl.storageKey));
-            let fontSizePx = savedFontSizePx >= MIN_TABLE_FONT_SIZE_PX && savedFontSizePx <= MAX_TABLE_FONT_SIZE_PX
-                ? savedFontSizePx
-                : DEFAULT_TABLE_FONT_SIZE_PX;
-            function showFontSize() {
-                imagingRunsTable.style.setProperty(tableFontSizeControl.cssProperty, `${fontSizePx}px`);
-                fontSizeOutput.textContent = `${fontSizePx} px`;
-                decreaseButton.disabled = fontSizePx <= MIN_TABLE_FONT_SIZE_PX;
-                increaseButton.disabled = fontSizePx >= MAX_TABLE_FONT_SIZE_PX;
-                localStorage.setItem(tableFontSizeControl.storageKey, String(fontSizePx));
+        function setUpSizeControl(sizeControl) {
+            const sizedElement = document.getElementById(sizeControl.sizedElementId);
+            const sizeOutput = document.getElementById(`${sizeControl.name}-size`);
+            const decreaseButton = document.getElementById(`${sizeControl.name}-size-decrease`);
+            const increaseButton = document.getElementById(`${sizeControl.name}-size-increase`);
+            const { min: minSizePx, max: maxSizePx } = sizeControl.sizeLimitsPx;
+            const savedSizePx = Number(localStorage.getItem(sizeControl.storageKey));
+            let sizePx = savedSizePx >= minSizePx && savedSizePx <= maxSizePx ? savedSizePx : sizeControl.defaultSizePx;
+            function showSize() {
+                sizedElement.style.setProperty(sizeControl.cssProperty, `${sizePx}px`);
+                sizeOutput.textContent = `${sizePx} px`;
+                decreaseButton.disabled = sizePx <= minSizePx;
+                increaseButton.disabled = sizePx >= maxSizePx;
             }
-            decreaseButton.addEventListener("click", () => { fontSizePx -= 1; showFontSize(); });
-            increaseButton.addEventListener("click", () => { fontSizePx += 1; showFontSize(); });
-            showFontSize();
+            // Saved only when changed, so a page load doesn't pin the default and hide later changes to it.
+            function changeSize(changePx) {
+                sizePx += changePx;
+                showSize();
+                localStorage.setItem(sizeControl.storageKey, String(sizePx));
+            }
+            decreaseButton.addEventListener("click", () => changeSize(-1));
+            increaseButton.addEventListener("click", () => changeSize(1));
+            showSize();
         }
 
         function formatScore(score, fractionDigits) {
@@ -350,7 +390,7 @@
             }
         }
 
-        async function loadSelectOptions(select, url, defaultValue) {
+        async function loadSelectOptions(select, url) {
             try {
                 const response = await fetch(url);
                 if (!response.ok) {
@@ -358,7 +398,6 @@
                 }
                 const optionValues = await response.json();
                 select.append(...optionValues.map((optionValue) => new Option(optionValue, optionValue)));
-                select.value = defaultValue;
             } catch (error) {
                 showQueryAlert("danger", "Could not load " + url, String(error));
             }
@@ -397,7 +436,27 @@
             localStorage.setItem(
                 FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...frozenImagingRunColumnLabels])
             );
+            showFreezeButtonStates();
             positionFrozenColumns();
+        }
+
+        function showFreezeButtonStates() {
+            for (const freezeButton of imagingRunColumnCheckboxes.querySelectorAll("button[data-column-label]")) {
+                const frozen = frozenImagingRunColumnLabels.has(freezeButton.dataset.columnLabel);
+                freezeButton.setAttribute("aria-pressed", String(frozen));
+                freezeButton.title = `${frozen ? "Unfreeze" : "Freeze"} ${freezeButton.dataset.columnLabel}`;
+                freezeButton.setAttribute("aria-label", freezeButton.title);
+            }
+        }
+
+        function freezeButton(columnLabel) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "freeze-column-button btn btn-link p-0 ms-1 align-baseline text-decoration-none";
+            button.dataset.columnLabel = columnLabel;
+            button.textContent = "📌";
+            button.addEventListener("click", () => toggleFrozenImagingRunColumn(columnLabel));
+            return button;
         }
 
         function positionFrozenColumns() {
@@ -425,12 +484,6 @@
                     frozenColumnLeftPx += imagingRunsHeader.cells[columnIndex].getBoundingClientRect().width;
                 }
             });
-            for (const freezeButton of imagingRunsHeader.querySelectorAll("button[data-column-label]")) {
-                const frozen = frozenImagingRunColumnLabels.has(freezeButton.dataset.columnLabel);
-                freezeButton.setAttribute("aria-pressed", String(frozen));
-                freezeButton.title = `${frozen ? "Unfreeze" : "Freeze"} ${freezeButton.dataset.columnLabel}`;
-                freezeButton.setAttribute("aria-label", freezeButton.title);
-            }
         }
 
         function saveAndShowSelectedImagingRunColumns() {
@@ -475,6 +528,9 @@
                     if (columnGroup.label !== null) {
                         checkboxWrapper.classList.add("ms-3");
                     }
+                    if (column.freezable) {
+                        checkboxWrapper.append(freezeButton(column.label));
+                    }
                     return { checkbox, checkboxWrapper };
                 });
                 if (columnGroup.label !== null) {
@@ -498,12 +554,37 @@
                 }
                 return columnGroupList;
             }));
+            showFreezeButtonStates();
+        }
+
+        function wellWatcherFovMetricsUrl(imagingRun) {
+            return WELL_WATCHER_FOV_METRICS_URL + encodeURIComponent(imagingRun.rawimg_id);
+        }
+
+        function newTabLink(url, text) {
+            const link = document.createElement("a");
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = text;
+            return link;
+        }
+
+        function imagingRunCellContent(column, imagingRun) {
+            const text = String(column.value(imagingRun));
+            if (!column.link) {
+                return text;
+            }
+            const link = newTabLink(column.link(imagingRun), text);
+            // Following the link shouldn't also select the row and start drawing its hybiscus plot.
+            link.addEventListener("click", (event) => event.stopPropagation());
+            return link;
         }
 
         function updateImagingRunCells() {
             shownImagingRuns.forEach((imagingRun, rowIndex) => {
                 IMAGING_RUN_COLUMNS.forEach((column, columnIndex) => {
-                    imagingRunsBody.rows[rowIndex].cells[columnIndex].textContent = column.value(imagingRun);
+                    imagingRunsBody.rows[rowIndex].cells[columnIndex].replaceChildren(imagingRunCellContent(column, imagingRun));
                 });
             });
         }
@@ -513,13 +594,7 @@
             imagingRunsHeader.replaceChildren(...IMAGING_RUN_COLUMNS.map((column) => {
                 const headerCell = document.createElement("th");
                 headerCell.scope = "col";
-                const freezeButton = document.createElement("button");
-                freezeButton.type = "button";
-                freezeButton.className = "freeze-column-button btn btn-link p-0 ms-1 align-baseline text-decoration-none";
-                freezeButton.dataset.columnLabel = column.label;
-                freezeButton.textContent = "📌";
-                freezeButton.addEventListener("click", () => toggleFrozenImagingRunColumn(column.label));
-                headerCell.append(column.label, freezeButton);
+                headerCell.textContent = column.label;
                 return headerCell;
             }));
             imagingRunsBody.replaceChildren(...imagingRuns.map((imagingRun) => {
@@ -527,7 +602,7 @@
                 row.dataset.photId = imagingRun.phot_id;
                 for (const column of IMAGING_RUN_COLUMNS) {
                     const cell = document.createElement("td");
-                    cell.textContent = column.value(imagingRun);
+                    cell.append(imagingRunCellContent(column, imagingRun));
                     row.append(cell);
                 }
                 row.addEventListener("click", () => selectImagingRun(imagingRun, row));
@@ -567,11 +642,7 @@
                 description.textContent = value ?? "–";
                 selectedImagingRunMetrics.append(term, description);
             }
-            const wellWatcherLink = document.createElement("a");
-            wellWatcherLink.href = WELL_WATCHER_FOV_METRICS_URL + encodeURIComponent(imagingRun.rawimg_id);
-            wellWatcherLink.target = "_blank";
-            wellWatcherLink.rel = "noopener";
-            wellWatcherLink.textContent = "Open in Well Watcher";
+            const wellWatcherLink = newTabLink(wellWatcherFovMetricsUrl(imagingRun), "Open in Well Watcher");
             const linkItem = document.createElement("dd");
             linkItem.className = "col-12 mt-2";
             linkItem.append(wellWatcherLink);
@@ -589,31 +660,148 @@
             return hybiscusPlotUrls.get(photId);
         }
 
-        async function selectImagingRun(imagingRun, row) {
-            for (const otherRow of imagingRunsBody.rows) {
-                otherRow.classList.toggle("table-active", otherRow === row);
+        async function fetchAlignmentPixelErrors(alignId) {
+            if (!alignmentPixelErrorsByAlignId.has(alignId)) {
+                const response = await fetch(`/alignments/${encodeURIComponent(alignId)}/pixel-errors`);
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: ${await responseErrorText(response)}`);
+                }
+                alignmentPixelErrorsByAlignId.set(alignId, await response.json());
             }
-            selectedPhotId = imagingRun.phot_id;
-            selectedImagingRunTitle.textContent = imagingRun.run_name;
-            showSelectedImagingRunMetrics(imagingRun);
-            selectedImagingRunPanel.classList.remove("d-none");
+            return alignmentPixelErrorsByAlignId.get(alignId);
+        }
+
+        function hexColorChannels(hexColor) {
+            return [1, 3, 5].map((start) => parseInt(hexColor.slice(start, start + 2), 16));
+        }
+
+        function pxErrorColor(pxError) {
+            if (pxError === null) {
+                return UNMEASURED_PX_ERROR_COLOR;
+            }
+            const clampedPxError = Math.min(Math.max(pxError, -PX_ERROR_COLOR_LIMIT), PX_ERROR_COLOR_LIMIT);
+            const colorPosition = (clampedPxError + PX_ERROR_COLOR_LIMIT) / (2 * PX_ERROR_COLOR_LIMIT) * (PX_ERROR_COLORS.length - 1);
+            const lowerColorIndex = Math.min(Math.floor(colorPosition), PX_ERROR_COLORS.length - 2);
+            const fraction = colorPosition - lowerColorIndex;
+            const lowerChannels = hexColorChannels(PX_ERROR_COLORS[lowerColorIndex]);
+            const upperChannels = hexColorChannels(PX_ERROR_COLORS[lowerColorIndex + 1]);
+            const mixedChannels = lowerChannels.map((lower, index) => Math.round(lower + (upperChannels[index] - lower) * fraction));
+            return `rgb(${mixedChannels.join(", ")})`;
+        }
+
+        function formatPxError(pxError) {
+            return pxError === null ? "not measured" : `${pxError.toFixed(3)} px`;
+        }
+
+        function svgElement(name, attributes) {
+            const element = document.createElementNS(SVG_NAMESPACE, name);
+            for (const [attributeName, value] of Object.entries(attributes)) {
+                element.setAttribute(attributeName, value);
+            }
+            return element;
+        }
+
+        function fovPxError(alignmentPixelErrors, axis, channel, fovIndex) {
+            return alignmentPixelErrors.total_px_errors[axis.name]?.[channel]?.[fovIndex] ?? null;
+        }
+
+        function pxErrorHeatmap(alignmentPixelErrors, channel, axis) {
+            const chipPositions = alignmentPixelErrors.fov_chip_positions;
+            const chipColumnCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.column)) + 1;
+            const chipRowCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.row)) + 1;
+            const title = `${channel} ${axis.label}`;
+            // Drawn one unit per FOV and scaled by the block size control's CSS variable, so resizing doesn't redraw.
+            const heatmap = svgElement("svg", {
+                viewBox: `0 0 ${chipColumnCount} ${chipRowCount}`,
+                style: `width: calc(var(--heatmap-fov-size) * ${chipColumnCount}); height: calc(var(--heatmap-fov-size) * ${chipRowCount});`,
+                role: "img",
+                "aria-label": `${title} pixel errors`,
+                "shape-rendering": "crispEdges",
+            });
+            chipPositions.forEach((chipPosition, fovIndex) => {
+                const fovBlock = svgElement("rect", {
+                    x: chipPosition.column,
+                    y: chipPosition.row,
+                    width: 1,
+                    height: 1,
+                    fill: pxErrorColor(fovPxError(alignmentPixelErrors, axis, channel, fovIndex)),
+                });
+                const tooltip = svgElement("title", {});
+                tooltip.textContent = [
+                    `FOV ${fovIndex + 1}`,
+                    ...ALIGNMENT_AXES.map((tooltipAxis) =>
+                        `${tooltipAxis.label}: ${formatPxError(fovPxError(alignmentPixelErrors, tooltipAxis, channel, fovIndex))}`),
+                ].join("\n");
+                fovBlock.append(tooltip);
+                heatmap.append(fovBlock);
+            });
+            const figure = document.createElement("figure");
+            figure.className = "mb-0";
+            const caption = document.createElement("figcaption");
+            caption.className = "small fw-semibold text-center mb-1";
+            caption.textContent = title;
+            figure.append(caption, heatmap);
+            return figure;
+        }
+
+        function drawAlignmentHeatmaps(alignmentPixelErrors) {
+            alignmentHeatmaps.replaceChildren(...alignmentPixelErrors.channels.map((channel) => {
+                const channelHeatmaps = document.createElement("div");
+                channelHeatmaps.className = "d-flex gap-3";
+                channelHeatmaps.append(...ALIGNMENT_AXES.map((axis) => pxErrorHeatmap(alignmentPixelErrors, channel, axis)));
+                return channelHeatmaps;
+            }));
+        }
+
+        async function showHybiscusPlot(imagingRun) {
             hybiscusPlot.classList.add("d-none");
             hybiscusPlotStatus.className = "text-body-secondary small mb-2";
             hybiscusPlotStatus.textContent = "Drawing the hybiscus plot…";
             try {
                 const plotUrl = await hybiscusPlotUrl(imagingRun.phot_id);
                 // Another row may have been selected while this plot was drawn.
-                if (selectedPhotId === imagingRun.phot_id) {
+                if (selectedImagingRun === imagingRun) {
                     hybiscusPlot.src = plotUrl;
                     hybiscusPlot.classList.remove("d-none");
                     hybiscusPlotStatus.textContent = "";
                 }
             } catch (error) {
-                if (selectedPhotId === imagingRun.phot_id) {
+                if (selectedImagingRun === imagingRun) {
                     hybiscusPlotStatus.className = "text-danger small mb-2";
                     hybiscusPlotStatus.textContent = "Could not draw the hybiscus plot. " + String(error.message ?? error);
                 }
             }
+        }
+
+        async function showAlignmentHeatmaps(imagingRun) {
+            alignmentHeatmaps.replaceChildren();
+            alignmentHeatmapsStatus.className = "text-body-secondary small mb-2";
+            alignmentHeatmapsStatus.textContent = "Fetching the alignment pixel errors…";
+            try {
+                const alignmentPixelErrors = await fetchAlignmentPixelErrors(imagingRun.align_id);
+                // Another row may have been selected while these were fetched.
+                if (selectedImagingRun === imagingRun) {
+                    drawAlignmentHeatmaps(alignmentPixelErrors);
+                    alignmentHeatmapsStatus.textContent = "";
+                }
+            } catch (error) {
+                if (selectedImagingRun === imagingRun) {
+                    alignmentHeatmapsStatus.className = "text-danger small mb-2";
+                    alignmentHeatmapsStatus.textContent = "Could not fetch the alignment pixel errors. " + String(error.message ?? error);
+                }
+            }
+        }
+
+        function selectImagingRun(imagingRun, row) {
+            for (const otherRow of imagingRunsBody.rows) {
+                otherRow.classList.toggle("table-active", otherRow === row);
+            }
+            selectedImagingRun = imagingRun;
+            selectedImagingRunTitle.textContent = imagingRun.run_name;
+            showSelectedImagingRunMetrics(imagingRun);
+            selectedImagingRunPanel.classList.remove("d-none");
+            showHybiscusPlot(imagingRun);
+            showAlignmentHeatmaps(imagingRun);
         }
 
         function showExecutedNotebook(notebookHtml) {
@@ -658,9 +846,10 @@
             }
         }
 
+        document.getElementById("px-error-color-scale").style.background = `linear-gradient(to right, ${PX_ERROR_COLORS.join(", ")})`;
         imagingRunQueryForm.elements.run_started_after.value = defaultRunStartedAfter();
         createImagingRunColumnCheckboxes();
-        TABLE_FONT_SIZE_CONTROLS.forEach(setUpTableFontSizeControl);
+        SIZE_CONTROLS.forEach(setUpSizeControl);
         // Font size changes, window resizes and new misaligned FOV counts all change column widths.
         new ResizeObserver(positionFrozenColumns).observe(imagingRunsTable);
         misalignedPxThresholdInput.addEventListener("input", updateImagingRunCells);
@@ -672,8 +861,8 @@
                 expLgidsInput.value = expLgidsInput.placeholder;
             }
         });
-        loadSelectOptions(imagingRunQueryForm.elements.microscope, "/microscopes", DEFAULT_MICROSCOPE);
-        loadSelectOptions(imagingRunQueryForm.elements.exp_type, "/exp-types", DEFAULT_EXP_TYPE);
+        loadSelectOptions(imagingRunQueryForm.elements.microscope, "/microscopes");
+        loadSelectOptions(imagingRunQueryForm.elements.exp_type, "/exp-types");
 
         imagingRunQueryForm.addEventListener("submit", async (event) => {
             event.preventDefault();

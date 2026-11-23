@@ -10,7 +10,13 @@ from fastapi import Path as PathParameter
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from microscope_toolbox import hybiscus_plots, imaging_runs, notebook_runs
+from microscope_toolbox import (
+    alignment_pixel_errors,
+    hybiscus_plots,
+    imaging_runs,
+    notebook_runs,
+)
+from microscope_toolbox.alignment_pixel_errors import AlignmentPixelErrors
 from microscope_toolbox.imaging_run_query import (
     EXP_TYPES,
     MICROSCOPES,
@@ -141,6 +147,25 @@ def get_hybiscus_plot(
     except KERNEL_FAILURES as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return Response(content=hybiscus_plot_png, media_type=hybiscus_plots.PNG_MIME_TYPE)
+
+
+@app.get("/alignments/{align_id}/pixel-errors", response_model=AlignmentPixelErrors)
+def get_alignment_pixel_errors(
+    jupyter_server_settings: ConfiguredJupyterServerSettings,
+    align_id: Annotated[int, PathParameter(ge=1)],
+) -> AlignmentPixelErrors:
+    """The alignment's vertical and horizontal pixel error per channel and FOV.
+
+    What the notebook's alignment heatmaps show, with each FOV's place on the
+    chip. Fetches them in a kernel on the Jupyter server and blocks until it
+    finishes.
+    """
+    try:
+        return alignment_pixel_errors.fetch_alignment_pixel_errors(
+            jupyter_server_settings, align_id
+        )
+    except (*KERNEL_FAILURES, pydantic.ValidationError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 # Mounted last so the API routes above take precedence over the catch-all.

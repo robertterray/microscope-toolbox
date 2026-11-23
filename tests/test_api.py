@@ -2,7 +2,7 @@
 
 import base64
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import nbformat
@@ -223,13 +223,13 @@ def test_imaging_run_query_rejects_quotes(jupyter_server: MagicMock) -> None:
     jupyter_server.log_in.assert_not_called()
 
 
-def imaging_runs_cell_execution(imaging_runs: List[Dict[str, Any]]) -> CellExecution:
+def json_cell_execution(json_output: Any) -> CellExecution:
     return CellExecution(
         execution_count=1,
         outputs=[
             nbformat.v4.new_output(
                 "execute_result",
-                data={"application/json": imaging_runs, "text/plain": "<JSON>"},
+                data={"application/json": json_output, "text/plain": "<JSON>"},
                 execution_count=1,
             )
         ],
@@ -260,7 +260,7 @@ IMAGING_RUN = {
 
 def test_list_imaging_runs(jupyter_server: MagicMock) -> None:
     kernel = remote_kernel(jupyter_server)
-    kernel.execute.return_value = imaging_runs_cell_execution([IMAGING_RUN])
+    kernel.execute.return_value = json_cell_execution([IMAGING_RUN])
     response = client.get(
         "/imaging-runs",
         params={"microscope": "TigerD4", "exp_lgids": [3035916, 3037159]},
@@ -276,7 +276,7 @@ def test_list_imaging_runs(jupyter_server: MagicMock) -> None:
 
 
 def test_list_imaging_runs_with_no_matches(jupyter_server: MagicMock) -> None:
-    remote_kernel(jupyter_server).execute.return_value = imaging_runs_cell_execution([])
+    remote_kernel(jupyter_server).execute.return_value = json_cell_execution([])
     response = client.get("/imaging-runs", params={"microscope": "TigerD4"})
     assert response.status_code == 200
     assert response.json() == []
@@ -301,7 +301,7 @@ def test_list_imaging_runs_without_json_output(jupyter_server: MagicMock) -> Non
 
 
 def test_list_imaging_runs_with_unexpected_columns(jupyter_server: MagicMock) -> None:
-    remote_kernel(jupyter_server).execute.return_value = imaging_runs_cell_execution(
+    remote_kernel(jupyter_server).execute.return_value = json_cell_execution(
         [{"rawimg_id": 11}]
     )
     response = client.get("/imaging-runs", params={"microscope": "TigerD4"})
@@ -364,5 +364,51 @@ def test_get_hybiscus_plot_with_failing_kernel_code(
 
 def test_get_hybiscus_plot_needs_a_phot_id(jupyter_server: MagicMock) -> None:
     response = client.get("/photometries/0/hybiscus-plot")
+    assert response.status_code == 422
+    jupyter_server.log_in.assert_not_called()
+
+
+ALIGNMENT_PIXEL_ERRORS = {
+    "align_id": 21,
+    "channels": ["AF405"],
+    "fov_chip_positions": [{"row": 0, "column": 0}, {"row": 0, "column": 1}],
+    "total_px_errors": {"vert": {"AF405": [0.5, None]}, "horz": {"AF405": [-1.0, 2.0]}},
+}
+
+
+def test_get_alignment_pixel_errors(jupyter_server: MagicMock) -> None:
+    kernel = remote_kernel(jupyter_server)
+    kernel.execute.return_value = json_cell_execution(ALIGNMENT_PIXEL_ERRORS)
+    response = client.get("/alignments/21/pixel-errors")
+    assert response.status_code == 200
+    assert response.json() == ALIGNMENT_PIXEL_ERRORS
+    assert "fetch_alignment_pixel_errors(21)" in kernel.execute.call_args.args[0]
+
+
+def test_get_alignment_pixel_errors_with_failing_kernel_code(
+    jupyter_server: MagicMock,
+) -> None:
+    remote_kernel(jupyter_server).execute.return_value = CellExecution(
+        execution_count=1, error="DataJointError: align_id 1 not found"
+    )
+    response = client.get("/alignments/1/pixel-errors")
+    assert response.status_code == 502
+    assert "align_id 1 not found" in response.json()["detail"]
+
+
+def test_get_alignment_pixel_errors_with_unexpected_fields(
+    jupyter_server: MagicMock,
+) -> None:
+    remote_kernel(jupyter_server).execute.return_value = json_cell_execution(
+        {"align_id": 21}
+    )
+    response = client.get("/alignments/21/pixel-errors")
+    assert response.status_code == 502
+
+
+def test_get_alignment_pixel_errors_needs_an_align_id(
+    jupyter_server: MagicMock,
+) -> None:
+    response = client.get("/alignments/0/pixel-errors")
     assert response.status_code == 422
     jupyter_server.log_in.assert_not_called()

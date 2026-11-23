@@ -20,11 +20,16 @@ On top of that, this repo contains a small FastAPI web app:
 - **Hybiscus plots**: a photometry's hybiscus plot and per-channel histograms as a PNG, drawn in a
   kernel on the Jupyter server (`hybiscus_plots_in_kernel.py`). The notebook draws it when a row of
   its runs table is selected, which can't work in the exported HTML.
+- **Alignment pixel errors**: an alignment's vertical and horizontal pixel error per channel and FOV,
+  with each FOV's place on the chip, fetched in a kernel (`alignment_pixel_errors_in_kernel.py`).
+  The page draws them as the notebook's "Alignment Error for All Channels" heatmaps.
 - **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
-  runs table from `/imaging-runs`; selecting a row shows the run's metrics and its hybiscus plot.
-  "Run Notebook" runs the notebook and shows its output, including the alignment heatmaps the runs
-  table doesn't have yet. The runs table counts misaligned FOVs in the browser, from each run's
-  largest alignment error per FOV, so changing the threshold doesn't rerun the query.
+  runs table from `/imaging-runs`; selecting a row shows the run's metrics, its hybiscus plot and its
+  alignment heatmaps (SVG, with a tooltip per FOV). The Chip column links to the run in Well
+  Watcher. "Run Notebook" runs the notebook and shows its output, including the total alignment
+  error across runs (the notebook's appendix), which the page doesn't have yet. The runs table
+  counts misaligned FOVs in the browser, from each run's largest alignment error per FOV, so
+  changing the threshold doesn't rerun the query.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
@@ -42,13 +47,16 @@ On top of that, this repo contains a small FastAPI web app:
   to the kernel.
 - `microscope_toolbox/hybiscus_plots.py` and `hybiscus_plots_in_kernel.py`: the same split for the
   hybiscus plot.
+- `microscope_toolbox/alignment_pixel_errors.py` and `alignment_pixel_errors_in_kernel.py`: the
+  same split for the alignment pixel errors.
 - `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
   sessions API and the kernel websocket.
 - `microscope_toolbox/notebooks/automations_qc_notebook.ipynb`: the notebook the app runs (see
   Conventions and gotchas).
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
   build step. `vendor/` holds a local copy of Bootstrap 5.3.3 CSS, so the page works offline.
-- `tests/`: pytest suite (`test_api.py`, `test_hybiscus_plots_in_kernel.py`,
+- `tests/`: pytest suite (`test_api.py`, `test_alignment_pixel_errors_in_kernel.py`,
+  `test_hybiscus_plots_in_kernel.py`,
   `test_imaging_run_query.py`, `test_imaging_runs_in_kernel.py`, `test_remote_jupyter.py`).
 
 ## API
@@ -61,6 +69,7 @@ On top of that, this repo contains a small FastAPI web app:
 | POST | `/notebook-runs` | Run the automations QC notebook (blocks), with an optional imaging run query body; 201 even if a cell fails, 422 for an empty or unsafe query, 502 if the Jupyter server fails or the notebook has no `query_params` cell |
 | GET | `/imaging-runs` | Imaging runs matching an imaging run query (query parameters), with their alignment and QC scores (blocks); 422 for an empty or unsafe query, 502 if the Jupyter server or the query fails |
 | GET | `/photometries/{phot_id}/hybiscus-plot` | The photometry's hybiscus plot and histograms as a PNG (blocks, about 20 s); 422 for an invalid `phot_id`, 502 if the Jupyter server or the plotting fails |
+| GET | `/alignments/{align_id}/pixel-errors` | The alignment's vertical and horizontal pixel error per channel and FOV, with each FOV's chip position (blocks); 422 for an invalid `align_id`, 502 if the Jupyter server or the query fails |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
