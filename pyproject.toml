@@ -13,14 +13,23 @@ classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "requests>=2.25",
     "fastapi>=0.100",
+    "pydantic>=2",
     "uvicorn>=0.23",
+    "nbformat>=5",
+    "nbconvert>=7",
+    "websocket-client>=1.0",
 ]
 
 [project.optional-dependencies]
 pinned = [
     "requests==2.31.0",
     "fastapi==0.115.0",
+    "pydantic==2.13.5",
     "uvicorn==0.30.6",
+    # nbformat 5.11+ requires Python 3.10
+    "nbformat==5.10.4",
+    "nbconvert==7.17.1",
+    "websocket-client==1.8.0",
 ]
 dev = [
     "coverage==6.3.2",
@@ -33,6 +42,10 @@ dev = [
     "ruff==0.16.9",
     # Later versions require urllib3 2.x; requirements.txt pins urllib3 1.26
     "types-requests==2.31.0.6",
+    # Only the tests of imaging_runs_in_kernel, whose code runs on the Jupyter
+    # server; numpy 2 like the server (the notebook's printoptions fix needs it)
+    "numpy==2.0.2",
+    "pandas==2.2.3",
 ]
 
 [[tool.uv.index]]
@@ -50,6 +63,13 @@ version = {attr = "microscope_toolbox.__version__"}
 [tool.ruff]
 target-version = "py39"
 line-length = 88  # match black
+# A copy of a terray_notebooks notebook that should only differ from it by its
+# fixes; "unused" imports such as datetime are used by the query_params cell the
+# app writes into it.
+extend-exclude = ["microscope_toolbox/notebooks"]
+
+[tool.black]
+extend-exclude = "microscope_toolbox/notebooks/"
 
 [tool.ruff.lint]
 # E/W pycodestyle, F pyflakes, I isort, N pep8-naming, B bugbear, UP pyupgrade, SIM simplify

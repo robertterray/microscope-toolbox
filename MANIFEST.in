@@ -1,2 +1,3 @@
 global-include *.sql
 recursive-include microscope_toolbox/static *
+recursive-include microscope_toolbox/notebooks *.ipynb
