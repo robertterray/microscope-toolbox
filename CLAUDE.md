@@ -30,6 +30,12 @@ On top of that, this repo contains a small FastAPI web app:
   alignment error across runs (the notebook's appendix) isn't on the page yet. The runs table
   counts misaligned FOVs in the browser, from each run's largest alignment error per FOV, so
   changing the threshold doesn't rerun the query.
+- **Flow cells**: a flow cell is 3 rows of 4 chips; each row is imaged under its own LG number
+  (`FLOW_CELL_ROW_EXP_LGIDS` in `index.html`: 145127, 145128, 145129) and each chip is a row of the
+  runs table. The page finds flow cells among the shown runs: all 12 chips on one microscope under
+  one run name (without its `ChipN` suffix), with at most `MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS`
+  between one chip's run end and the next chip's start. Selecting one draws its 12 heatmaps for one
+  axis and channel, fetched together from `/alignments/pixel-errors`.
 
 <!-- TODO: describe who uses this app and what it is for. -->
 
@@ -70,6 +76,7 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/imaging-runs` | Imaging runs matching an imaging run query (query parameters), with their alignment and QC scores (blocks); 422 for an empty or unsafe query, 502 if the Jupyter server or the query fails |
 | GET | `/photometries/{phot_id}/hybiscus-plot` | The photometry's hybiscus plot and histograms as a PNG (blocks, about 20 s); 422 for an invalid `phot_id`, 502 if the Jupyter server or the plotting fails |
 | GET | `/alignments/{align_id}/pixel-errors` | The alignment's vertical and horizontal pixel error per channel and FOV, with each FOV's chip position (blocks); 422 for an invalid `align_id`, 502 if the Jupyter server or the query fails |
+| GET | `/alignments/pixel-errors` | Like the route above for several `align_ids` (up to 24), fetched in one kernel; 422 for missing or invalid ids |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above

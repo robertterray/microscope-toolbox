@@ -86,11 +86,16 @@ def test_fetch_alignment_pixel_errors(fetched_align_ids: List[int]) -> None:
     assert np.get_printoptions()["legacy"] == "1.25"
 
 
-def test_kernel_code_displays_the_alignment_pixel_errors_as_json(
+def test_kernel_code_displays_the_alignments_pixel_errors_as_json(
     fetched_align_ids: List[int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     json_display = MagicMock()
     monkeypatch.setattr("IPython.display.JSON", json_display)
-    exec(kernel_code(21), {})
-    json_display.assert_called_once_with(EXPECTED_ALIGNMENT_PIXEL_ERRORS)
-    assert fetched_align_ids == [21]
+    exec(kernel_code([21, 22]), {})
+    json_display.assert_called_once_with(
+        [
+            EXPECTED_ALIGNMENT_PIXEL_ERRORS,
+            {**EXPECTED_ALIGNMENT_PIXEL_ERRORS, "align_id": 22},
+        ]
+    )
+    assert fetched_align_ids == [21, 22]

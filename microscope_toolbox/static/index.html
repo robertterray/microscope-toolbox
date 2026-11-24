@@ -9,7 +9,10 @@
         #imaging-runs-table th { font-size: var(--imaging-runs-header-font-size, 14px); }
         #imaging-runs-table td { font-size: var(--imaging-runs-cell-font-size, 16px); }
         #imaging-runs-table .frozen-column { position: sticky; z-index: 1; }
-        #px-error-color-scale { width: 12rem; height: 0.75rem; }
+        .px-error-color-scale { width: 12rem; height: 0.75rem; }
+        #flow-cell-heatmaps { display: grid; grid-template-columns: auto repeat(var(--flow-cell-chips-per-row), max-content); align-items: end; }
+        /* Reads bottom to top, and takes a line's height instead of the LG number's width beside the plots. */
+        .flow-cell-row-label { writing-mode: vertical-rl; transform: rotate(180deg); margin-left: -0.5rem; line-height: 1; }
         .freeze-column-button { font-size: 0.8em; line-height: 1; opacity: 0.25; }
         .freeze-column-button:hover, .freeze-column-button[aria-pressed="true"] { opacity: 1; }
         /* A border on a sticky cell stays behind when the table scrolls, so the edge is drawn inside the cell. */
@@ -43,7 +46,7 @@
                             </select>
                         </div>
                         <div class="col-12 col-sm-6 col-lg">
-                            <label for="exp-lgids" class="form-label">LabGuru experiment IDs (LG numbers)</label>
+                            <label for="exp-lgids" class="form-label">LG number(s)</label>
                             <input id="exp-lgids" name="exp_lgids" inputmode="numeric" pattern="\s*\d+(\s*,\s*\d+)*\s*,?\s*" title="LG numbers separated by commas" placeholder="145127,145128,145129" class="form-control">
                             <div class="form-text">Separate several LG numbers with commas. The suggestion is the stage testing script's LG numbers; press Tab in the empty field to use it.</div>
                         </div>
@@ -119,7 +122,7 @@
                     <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
                         <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors.</span>
                         <span>≤ −3 px</span>
-                        <span id="px-error-color-scale" class="rounded border"></span>
+                        <span class="px-error-color-scale rounded border"></span>
                         <span>≥ 3 px</span>
                         <div class="input-group input-group-sm w-auto ms-auto">
                             <span class="input-group-text">Plot size</span>
@@ -145,6 +148,41 @@
                 </details>
             </div>
         </div>
+
+        <div class="card shadow-sm mt-3" id="flow-cell-panel">
+            <div class="card-body">
+                <h2 class="h5 card-title">Flow cell alignment</h2>
+                <p id="flow-cell-description" class="text-body-secondary small"></p>
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-md-6">
+                        <label for="flow-cell" class="form-label">Flow cell</label>
+                        <select id="flow-cell" class="form-select"></select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label for="flow-cell-axis" class="form-label">Alignment axis</label>
+                        <select id="flow-cell-axis" class="form-select"></select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label for="flow-cell-channel" class="form-label">Channel</label>
+                        <select id="flow-cell-channel" class="form-select"></select>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
+                    <span>Each square shows one FOV at its position on its chip; hover to see its number and pixel errors.</span>
+                    <span>≤ −3 px</span>
+                    <span class="px-error-color-scale rounded border"></span>
+                    <span>≥ 3 px</span>
+                    <div class="input-group input-group-sm w-auto ms-auto">
+                        <span class="input-group-text">Plot size</span>
+                        <button id="flow-cell-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller plots">−</button>
+                        <output id="flow-cell-fov-size" class="input-group-text"></output>
+                        <button id="flow-cell-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger plots">+</button>
+                    </div>
+                </div>
+                <div id="flow-cell-heatmaps-status" class="text-body-secondary small mb-2"></div>
+                <div id="flow-cell-heatmaps" class="column-gap-2 row-gap-2"></div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -159,6 +197,12 @@
         const PX_ERROR_COLORS = ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"];
         const UNMEASURED_PX_ERROR_COLOR = "#adb5bd";
         const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+        // A flow cell holds 3 rows of 4 chips, and each row is imaged under its own LG number.
+        const FLOW_CELL_ROW_EXP_LGIDS = [145127, 145128, 145129];
+        const FLOW_CELL_CHIPS = [1, 2, 3, 4];
+        // A flow cell's chips are imaged one after another, so a longer pause between chips starts another flow cell.
+        const MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS = 60;
+        const ALIGNMENT_CHANNELS = ["AF405", "AF458", "AF568", "AF633", "AF750"];
         // Saved frozen columns refer to columns by key, so a key must stay the same when its label changes.
         const IMAGING_RUN_COLUMN_GROUPS = [
             {
@@ -227,6 +271,7 @@
             { name: "header-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx", defaultSizePx: 14, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "cell-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx", defaultSizePx: 16, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "heatmap-fov", sizedElementId: "alignment-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "heatmapFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 4, max: 30 } },
+            { name: "flow-cell-fov", sizedElementId: "flow-cell-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "flowCellFovSizePx", defaultSizePx: 9, sizeLimitsPx: { min: 2, max: 30 } },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
         const showImagingRunsButton = document.getElementById("show-imaging-runs-button");
@@ -247,11 +292,18 @@
         const hybiscusPlot = document.getElementById("hybiscus-plot");
         const alignmentHeatmapsStatus = document.getElementById("alignment-heatmaps-status");
         const alignmentHeatmaps = document.getElementById("alignment-heatmaps");
+        const flowCellSelect = document.getElementById("flow-cell");
+        const flowCellAxisSelect = document.getElementById("flow-cell-axis");
+        const flowCellChannelSelect = document.getElementById("flow-cell-channel");
+        const flowCellHeatmapsStatus = document.getElementById("flow-cell-heatmaps-status");
+        const flowCellHeatmaps = document.getElementById("flow-cell-heatmaps");
         // A photometry's plot never changes, so each one is drawn at most once per page load.
         const hybiscusPlotUrls = new Map();
         const alignmentPixelErrorsByAlignId = new Map();
         let selectedImagingRun = null;
         let shownImagingRuns = [];
+        let shownFlowCells = [];
+        let selectedFlowCell = null;
         const freezableImagingRunColumnKeys = new Set(
             IMAGING_RUN_COLUMNS.filter((column) => column.freezable).map((column) => column.key)
         );
@@ -596,6 +648,7 @@
                 return row;
             }));
             showSelectedImagingRunColumns();
+            showFlowCells(findFlowCells(imagingRuns));
             selectedImagingRunPanel.classList.add("d-none");
             imagingRunsPanel.classList.remove("d-none");
         }
@@ -658,6 +711,21 @@
             return alignmentPixelErrorsByAlignId.get(alignId);
         }
 
+        async function fetchPixelErrorsOfAlignments(alignIds) {
+            const unfetchedAlignIds = alignIds.filter((alignId) => !alignmentPixelErrorsByAlignId.has(alignId));
+            if (unfetchedAlignIds.length > 0) {
+                const alignIdParameters = new URLSearchParams(unfetchedAlignIds.map((alignId) => ["align_ids", alignId]));
+                const response = await fetch("/alignments/pixel-errors?" + alignIdParameters);
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: ${await responseErrorText(response)}`);
+                }
+                for (const alignmentPixelErrors of await response.json()) {
+                    alignmentPixelErrorsByAlignId.set(alignmentPixelErrors.align_id, alignmentPixelErrors);
+                }
+            }
+            return alignIds.map((alignId) => alignmentPixelErrorsByAlignId.get(alignId));
+        }
+
         function hexColorChannels(hexColor) {
             return [1, 3, 5].map((start) => parseInt(hexColor.slice(start, start + 2), 16));
         }
@@ -692,17 +760,16 @@
             return alignmentPixelErrors.total_px_errors[axis.name]?.[channel]?.[fovIndex] ?? null;
         }
 
-        function pxErrorHeatmap(alignmentPixelErrors, channel, axis) {
+        function pxErrorHeatmap(alignmentPixelErrors, channel, axis, caption, heatmapName) {
             const chipPositions = alignmentPixelErrors.fov_chip_positions;
             const chipColumnCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.column)) + 1;
             const chipRowCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.row)) + 1;
-            const title = `${channel} ${axis.label}`;
             // Drawn one unit per FOV and scaled by the plot size control's CSS variable, so resizing doesn't redraw.
             const heatmap = svgElement("svg", {
                 viewBox: `0 0 ${chipColumnCount} ${chipRowCount}`,
                 style: `width: calc(var(--heatmap-fov-size) * ${chipColumnCount}); height: calc(var(--heatmap-fov-size) * ${chipRowCount});`,
                 role: "img",
-                "aria-label": `${title} pixel errors`,
+                "aria-label": `${heatmapName} pixel errors`,
                 "shape-rendering": "crispEdges",
             });
             chipPositions.forEach((chipPosition, fovIndex) => {
@@ -724,10 +791,10 @@
             });
             const figure = document.createElement("figure");
             figure.className = "mb-0";
-            const caption = document.createElement("figcaption");
-            caption.className = "small fw-semibold text-center mb-1";
-            caption.textContent = title;
-            figure.append(caption, heatmap);
+            const figcaption = document.createElement("figcaption");
+            figcaption.className = "small fw-semibold text-center mb-1";
+            figcaption.textContent = caption;
+            figure.append(figcaption, heatmap);
             return figure;
         }
 
@@ -735,7 +802,10 @@
             alignmentHeatmaps.replaceChildren(...alignmentPixelErrors.channels.map((channel) => {
                 const channelHeatmaps = document.createElement("div");
                 channelHeatmaps.className = "d-flex gap-3";
-                channelHeatmaps.append(...ALIGNMENT_AXES.map((axis) => pxErrorHeatmap(alignmentPixelErrors, channel, axis)));
+                channelHeatmaps.append(...ALIGNMENT_AXES.map((axis) => {
+                    const title = `${channel} ${axis.label}`;
+                    return pxErrorHeatmap(alignmentPixelErrors, channel, axis, title, title);
+                }));
                 return channelHeatmaps;
             }));
         }
@@ -779,6 +849,159 @@
             }
         }
 
+        function flowCellChipKey(expLgid, chip) {
+            return `LG${expLgid} chip ${chip}`;
+        }
+
+        function imagingRunEndMs(imagingRun) {
+            return Date.parse(imagingRun.run_start) + (imagingRun.run_dur ?? 0) * 1000;
+        }
+
+        function flowCellOf(chipRuns) {
+            const imagingRunsByChipKey = new Map(chipRuns.map((chipRun) => [flowCellChipKey(chipRun.imagingRun.exp_lgid, chipRun.chip), chipRun.imagingRun]));
+            const flowCellChipCount = FLOW_CELL_ROW_EXP_LGIDS.length * FLOW_CELL_CHIPS.length;
+            if (chipRuns.length !== flowCellChipCount || imagingRunsByChipKey.size !== flowCellChipCount) {
+                return null;
+            }
+            const firstImagingRun = chipRuns[0].imagingRun;
+            return {
+                runStart: firstImagingRun.run_start,
+                runNameWithoutChip: chipRuns[0].runNameWithoutChip,
+                microscope: firstImagingRun.microscope,
+                imagingRunsByChipKey,
+            };
+        }
+
+        function findFlowCells(imagingRuns) {
+            const chipRunsByRunName = new Map();
+            for (const imagingRun of imagingRuns) {
+                const { runNameWithoutChip, chip } = runNameAndChip(imagingRun.run_name);
+                if (!FLOW_CELL_ROW_EXP_LGIDS.includes(imagingRun.exp_lgid) || !FLOW_CELL_CHIPS.includes(chip)) {
+                    continue;
+                }
+                // The same run name on two microscopes is two flow cells.
+                const runNameKey = JSON.stringify([imagingRun.microscope.toUpperCase(), runNameWithoutChip]);
+                if (!chipRunsByRunName.has(runNameKey)) {
+                    chipRunsByRunName.set(runNameKey, []);
+                }
+                chipRunsByRunName.get(runNameKey).push({ imagingRun, runNameWithoutChip, chip });
+            }
+            const flowCells = [];
+            const maxMsBetweenChips = MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS * 60 * 1000;
+            for (const chipRuns of chipRunsByRunName.values()) {
+                chipRuns.sort((first, second) => Date.parse(first.imagingRun.run_start) - Date.parse(second.imagingRun.run_start));
+                let imagingSession = [];
+                let imagingSessionEndMs = -Infinity;
+                for (const chipRun of [...chipRuns, null]) {
+                    if (chipRun === null || Date.parse(chipRun.imagingRun.run_start) - imagingSessionEndMs > maxMsBetweenChips) {
+                        const flowCell = flowCellOf(imagingSession);
+                        if (flowCell !== null) {
+                            flowCells.push(flowCell);
+                        }
+                        imagingSession = [];
+                        imagingSessionEndMs = -Infinity;
+                    }
+                    if (chipRun !== null) {
+                        imagingSession.push(chipRun);
+                        imagingSessionEndMs = Math.max(imagingSessionEndMs, imagingRunEndMs(chipRun.imagingRun));
+                    }
+                }
+            }
+            return flowCells.sort((first, second) => second.runStart.localeCompare(first.runStart));
+        }
+
+        function flowCellLabel(flowCell) {
+            return `${flowCell.runStart.replace("T", " ")} · ${flowCell.runNameWithoutChip} · ${flowCell.microscope}`;
+        }
+
+        function showFlowCells(flowCells) {
+            shownFlowCells = flowCells;
+            selectedFlowCell = null;
+            flowCellHeatmaps.replaceChildren();
+            flowCellHeatmapsStatus.className = "text-body-secondary small mb-2";
+            flowCellHeatmapsStatus.textContent = "";
+            if (flowCells.length === 0) {
+                flowCellSelect.replaceChildren(new Option("No flow cells among these imaging runs", ""));
+                flowCellSelect.disabled = true;
+                return;
+            }
+            flowCellSelect.replaceChildren(
+                new Option(`Select one of ${flowCells.length} flow cells`, ""),
+                ...flowCells.map((flowCell, flowCellIndex) => new Option(flowCellLabel(flowCell), String(flowCellIndex)))
+            );
+            flowCellSelect.disabled = false;
+        }
+
+        function drawFlowCellHeatmaps(flowCell) {
+            const channel = flowCellChannelSelect.value;
+            const axis = ALIGNMENT_AXES.find((alignmentAxis) => alignmentAxis.name === flowCellAxisSelect.value);
+            flowCellHeatmaps.replaceChildren(...FLOW_CELL_ROW_EXP_LGIDS.flatMap((expLgid) => {
+                const rowLabel = document.createElement("div");
+                rowLabel.className = "flow-cell-row-label small fw-semibold align-self-center text-center";
+                rowLabel.textContent = `LG${expLgid}`;
+                return [rowLabel, ...FLOW_CELL_CHIPS.map((chip) => {
+                    const chipKey = flowCellChipKey(expLgid, chip);
+                    const imagingRun = flowCell.imagingRunsByChipKey.get(chipKey);
+                    return pxErrorHeatmap(
+                        alignmentPixelErrorsByAlignId.get(imagingRun.align_id), channel, axis,
+                        `Chip ${chip}`, `${chipKey} ${channel} ${axis.label}`
+                    );
+                })];
+            }));
+        }
+
+        async function showFlowCellHeatmaps(flowCell) {
+            flowCellHeatmaps.replaceChildren();
+            flowCellHeatmapsStatus.className = "text-body-secondary small mb-2";
+            flowCellHeatmapsStatus.textContent = "Fetching the alignment pixel errors of the flow cell's 12 chips…";
+            try {
+                await fetchPixelErrorsOfAlignments([...flowCell.imagingRunsByChipKey.values()].map((imagingRun) => imagingRun.align_id));
+                // Another flow cell may have been selected while these were fetched.
+                if (selectedFlowCell === flowCell) {
+                    drawFlowCellHeatmaps(flowCell);
+                    flowCellHeatmapsStatus.textContent = "";
+                }
+            } catch (error) {
+                if (selectedFlowCell === flowCell) {
+                    flowCellHeatmapsStatus.className = "text-danger small mb-2";
+                    flowCellHeatmapsStatus.textContent = "Could not fetch the alignment pixel errors. " + String(error.message ?? error);
+                }
+            }
+        }
+
+        function selectFlowCell() {
+            selectedFlowCell = flowCellSelect.value === "" ? null : shownFlowCells[Number(flowCellSelect.value)];
+            if (selectedFlowCell === null) {
+                flowCellHeatmaps.replaceChildren();
+                flowCellHeatmapsStatus.textContent = "";
+                return;
+            }
+            showFlowCellHeatmaps(selectedFlowCell);
+        }
+
+        function redrawSelectedFlowCellHeatmaps() {
+            const alignIds = selectedFlowCell ? [...selectedFlowCell.imagingRunsByChipKey.values()].map((imagingRun) => imagingRun.align_id) : [];
+            // Until the pixel errors arrive there is nothing to redraw; they are drawn with the new choice when they do.
+            if (alignIds.length > 0 && alignIds.every((alignId) => alignmentPixelErrorsByAlignId.has(alignId))) {
+                drawFlowCellHeatmaps(selectedFlowCell);
+            }
+        }
+
+        function setUpFlowCellControls() {
+            const rowLgNumbers = FLOW_CELL_ROW_EXP_LGIDS.map((expLgid) => `LG${expLgid}`);
+            document.getElementById("flow-cell-description").textContent =
+                `A flow cell is ${rowLgNumbers.length} rows of ${FLOW_CELL_CHIPS.length} chips: ${rowLgNumbers.join(", ")} from top to bottom, `
+                + `chips ${FLOW_CELL_CHIPS[0]}–${FLOW_CELL_CHIPS.at(-1)} from left to right. The list holds each set of all `
+                + `${rowLgNumbers.length * FLOW_CELL_CHIPS.length} chips in the table imaged on one microscope under one run name, `
+                + `with at most ${MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS} minutes between one chip's imaging and the next.`;
+            flowCellHeatmaps.style.setProperty("--flow-cell-chips-per-row", String(FLOW_CELL_CHIPS.length));
+            flowCellAxisSelect.append(...ALIGNMENT_AXES.map((axis) => new Option(axis.label, axis.name)));
+            flowCellChannelSelect.append(...ALIGNMENT_CHANNELS.map((channel) => new Option(channelWavelength(channel), channel)));
+            flowCellSelect.addEventListener("change", selectFlowCell);
+            flowCellAxisSelect.addEventListener("change", redrawSelectedFlowCellHeatmaps);
+            flowCellChannelSelect.addEventListener("change", redrawSelectedFlowCellHeatmaps);
+        }
+
         function selectedImagingRunTitleText(imagingRun) {
             const runStartDate = imagingRun.run_start.split("T")[0];
             const { runNameWithoutChip, chip } = runNameAndChip(imagingRun.run_name);
@@ -813,7 +1036,10 @@
             showImagingRuns(imagingRuns);
         }
 
-        document.getElementById("px-error-color-scale").style.background = `linear-gradient(to right, ${PX_ERROR_COLORS.join(", ")})`;
+        for (const pxErrorColorScale of document.querySelectorAll(".px-error-color-scale")) {
+            pxErrorColorScale.style.background = `linear-gradient(to right, ${PX_ERROR_COLORS.join(", ")})`;
+        }
+        setUpFlowCellControls();
         imagingRunQueryForm.elements.run_started_after.value = defaultRunStartedAfter();
         createImagingRunColumnCheckboxes();
         SIZE_CONTROLS.forEach(setUpSizeControl);

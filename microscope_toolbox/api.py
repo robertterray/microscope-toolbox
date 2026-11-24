@@ -31,6 +31,9 @@ from microscope_toolbox.remote_jupyter import JupyterServerError
 STATIC_DIR = Path(__file__).parent / "static"
 
 KERNEL_FAILURES = (JupyterServerError, KernelCodeError, requests.RequestException)
+# One kernel fetches the alignments one after another, so a long list would hold
+# the request open for minutes.
+MAX_ALIGN_IDS_PER_REQUEST = 24
 
 app = FastAPI(title="microscope_toolbox")
 
@@ -163,6 +166,28 @@ def get_alignment_pixel_errors(
     try:
         return alignment_pixel_errors.fetch_alignment_pixel_errors(
             jupyter_server_settings, align_id
+        )
+    except (*KERNEL_FAILURES, pydantic.ValidationError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/alignments/pixel-errors", response_model=List[AlignmentPixelErrors])
+def list_alignment_pixel_errors(
+    jupyter_server_settings: ConfiguredJupyterServerSettings,
+    align_ids: Annotated[
+        List[Annotated[int, pydantic.Field(ge=1)]],
+        Query(min_length=1, max_length=MAX_ALIGN_IDS_PER_REQUEST),
+    ],
+) -> List[AlignmentPixelErrors]:
+    """Several alignments' pixel errors, in the order of `align_ids`.
+
+    Like `/alignments/{align_id}/pixel-errors`, but fetched in one kernel, which
+    is much faster than one request per alignment, for example for the 12 chips
+    of a flow cell.
+    """
+    try:
+        return alignment_pixel_errors.fetch_pixel_errors_of_alignments(
+            jupyter_server_settings, align_ids
         )
     except (*KERNEL_FAILURES, pydantic.ValidationError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error

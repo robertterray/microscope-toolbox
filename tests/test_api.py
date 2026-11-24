@@ -378,11 +378,11 @@ ALIGNMENT_PIXEL_ERRORS = {
 
 def test_get_alignment_pixel_errors(jupyter_server: MagicMock) -> None:
     kernel = remote_kernel(jupyter_server)
-    kernel.execute.return_value = json_cell_execution(ALIGNMENT_PIXEL_ERRORS)
+    kernel.execute.return_value = json_cell_execution([ALIGNMENT_PIXEL_ERRORS])
     response = client.get("/alignments/21/pixel-errors")
     assert response.status_code == 200
     assert response.json() == ALIGNMENT_PIXEL_ERRORS
-    assert "fetch_alignment_pixel_errors(21)" in kernel.execute.call_args.args[0]
+    assert "for align_id in [21]" in kernel.execute.call_args.args[0]
 
 
 def test_get_alignment_pixel_errors_with_failing_kernel_code(
@@ -400,7 +400,7 @@ def test_get_alignment_pixel_errors_with_unexpected_fields(
     jupyter_server: MagicMock,
 ) -> None:
     remote_kernel(jupyter_server).execute.return_value = json_cell_execution(
-        {"align_id": 21}
+        [{"align_id": 21}]
     )
     response = client.get("/alignments/21/pixel-errors")
     assert response.status_code == 502
@@ -410,5 +410,30 @@ def test_get_alignment_pixel_errors_needs_an_align_id(
     jupyter_server: MagicMock,
 ) -> None:
     response = client.get("/alignments/0/pixel-errors")
+    assert response.status_code == 422
+    jupyter_server.log_in.assert_not_called()
+
+
+def test_list_alignment_pixel_errors_in_one_kernel(jupyter_server: MagicMock) -> None:
+    other_alignment_pixel_errors = {**ALIGNMENT_PIXEL_ERRORS, "align_id": 22}
+    kernel = remote_kernel(jupyter_server)
+    kernel.execute.return_value = json_cell_execution(
+        [ALIGNMENT_PIXEL_ERRORS, other_alignment_pixel_errors]
+    )
+    response = client.get("/alignments/pixel-errors?align_ids=21&align_ids=22")
+    assert response.status_code == 200
+    assert response.json() == [ALIGNMENT_PIXEL_ERRORS, other_alignment_pixel_errors]
+    kernel.execute.assert_called_once()
+    assert "for align_id in [21, 22]" in kernel.execute.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    "align_ids_query",
+    ["", "?align_ids=0", "?align_ids=x", "?" + "&".join(["align_ids=1"] * 25)],
+)
+def test_list_alignment_pixel_errors_rejects_invalid_align_ids(
+    jupyter_server: MagicMock, align_ids_query: str
+) -> None:
+    response = client.get("/alignments/pixel-errors" + align_ids_query)
     assert response.status_code == 422
     jupyter_server.log_in.assert_not_called()
