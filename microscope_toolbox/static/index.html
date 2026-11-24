@@ -9,6 +9,10 @@
         #imaging-runs-table th { font-size: var(--imaging-runs-header-font-size, 14px); }
         #imaging-runs-table td { font-size: var(--imaging-runs-cell-font-size, 16px); }
         #imaging-runs-table .frozen-column { position: sticky; z-index: 1; }
+        #alignment-heatmaps rect { cursor: pointer; }
+        #fov-corner-image svg { width: var(--fov-corner-image-width); max-width: 100%; height: auto; display: block; }
+        /* Keeps a box's outline the same width at any image size. */
+        #fov-corner-image rect { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
         .px-error-color-scale { width: 12rem; height: 0.75rem; }
         #flow-cell-heatmaps { display: grid; grid-template-columns: auto repeat(var(--flow-cell-chips-per-row), max-content); align-items: end; }
         /* Reads bottom to top, and takes a line's height instead of the LG number's width beside the plots. */
@@ -124,7 +128,7 @@
                     <details class="mb-3">
                         <summary class="h6">Alignment pixel errors plots</summary>
                         <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
-                            <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors.</span>
+                            <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors, and click to open it in the FOV inspector.</span>
                             <span>≤ −3 px</span>
                             <span class="px-error-color-scale rounded border"></span>
                             <span>≥ 3 px</span>
@@ -137,6 +141,36 @@
                         </div>
                         <div id="alignment-heatmaps-status" class="text-body-secondary small mb-2"></div>
                         <div id="alignment-heatmaps" class="d-flex flex-wrap column-gap-5 row-gap-3"></div>
+                    </details>
+                    <details class="mb-3" id="fov-inspector-section">
+                        <summary class="h6">FOV inspector</summary>
+                        <p class="small text-body-secondary mb-2">
+                            The corners of each FOV's aligned image, one tile per channel. Red boxes mark where the corners of the sub-grid should be; the
+                            other boxes mark where alignment QC located the sub-grid in this FOV, white where the signal was strong enough to track and black
+                            where it was too weak. That location is an estimate and is sometimes far off. Opens on the misaligned FOVs at the table's
+                            misalignment threshold. Use <kbd>j</kbd> and <kbd>k</kbd> to step through FOVs. Fetching takes about 15 seconds per 24 FOVs.
+                        </p>
+                        <form id="fov-inspector-form" class="d-flex flex-wrap align-items-end gap-2 small mb-2">
+                            <div>
+                                <label for="fov-inspector-fov-ids" class="form-label mb-1">FOV numbers</label>
+                                <input id="fov-inspector-fov-ids" class="form-control form-control-sm" style="width: 20rem;" placeholder="1, 36, 757">
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Inspect</button>
+                            <button id="fov-inspector-misaligned-fovs" type="button" class="btn btn-sm btn-outline-secondary">Misaligned FOVs</button>
+                            <div class="input-group input-group-sm w-auto ms-auto">
+                                <span class="input-group-text">Image width</span>
+                                <button id="fov-corner-image-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Narrower image">−</button>
+                                <output id="fov-corner-image-size" class="input-group-text"></output>
+                                <button id="fov-corner-image-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Wider image">+</button>
+                            </div>
+                        </form>
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <button id="fov-inspector-previous" type="button" class="btn btn-sm btn-outline-secondary" aria-label="Previous FOV (j)">‹ Previous</button>
+                            <output id="fov-inspector-position" class="small fw-semibold"></output>
+                            <button id="fov-inspector-next" type="button" class="btn btn-sm btn-outline-secondary" aria-label="Next FOV (k)">Next ›</button>
+                        </div>
+                        <div id="fov-inspector-status" class="text-body-secondary small mb-2"></div>
+                        <div id="fov-corner-image"></div>
                     </details>
                     <details>
                         <summary class="h6">Hybiscus plot and metrics</summary>
@@ -214,6 +248,9 @@
         // A flow cell's chips are imaged one after another, so a longer pause between chips starts another flow cell.
         const MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS = 60;
         const ALIGNMENT_CHANNELS = ["AF405", "AF458", "AF568", "AF633", "AF750"];
+        // The FOV inspector's route reads only chips of this many FOVs, and at most this many FOVs per request.
+        const FOVS_PER_CHIP = 792;
+        const MAX_FOV_IDS_PER_REQUEST = 24;
         // Saved frozen columns refer to columns by key, so a key must stay the same when its label changes.
         const IMAGING_RUN_COLUMN_GROUPS = [
             {
@@ -282,6 +319,7 @@
             { name: "header-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx", defaultSizePx: 14, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "cell-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx", defaultSizePx: 16, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "heatmap-fov", sizedElementId: "alignment-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "heatmapFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 4, max: 30 } },
+            { name: "fov-corner-image", sizedElementId: "fov-corner-image", cssProperty: "--fov-corner-image-width", storageKey: "fovCornerImageWidthPx", defaultSizePx: 720, sizeLimitsPx: { min: 240, max: 1440 }, stepPx: 80 },
             { name: "flow-cell-fov", sizedElementId: "flow-cell-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "flowCellFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 2, max: 30 } },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
@@ -298,12 +336,21 @@
         const imagingRunsTable = document.getElementById("imaging-runs-table");
         const selectedImagingRunPanel = document.getElementById("selected-imaging-run-panel");
         const selectedImagingRunTitle = document.getElementById("selected-imaging-run-title");
-        const selectedImagingRunPlotSections = document.querySelectorAll("#selected-imaging-run-plots > details");
+        const selectedImagingRunSections = [selectedImagingRunPanel, ...document.querySelectorAll("#selected-imaging-run-plots > details")];
         const selectedImagingRunMetrics = document.getElementById("selected-imaging-run-metrics");
         const hybiscusPlotStatus = document.getElementById("hybiscus-plot-status");
         const hybiscusPlot = document.getElementById("hybiscus-plot");
         const alignmentHeatmapsStatus = document.getElementById("alignment-heatmaps-status");
         const alignmentHeatmaps = document.getElementById("alignment-heatmaps");
+        const fovInspectorSection = document.getElementById("fov-inspector-section");
+        const fovInspectorForm = document.getElementById("fov-inspector-form");
+        const fovInspectorFovIdsInput = document.getElementById("fov-inspector-fov-ids");
+        const fovInspectorMisalignedFovsButton = document.getElementById("fov-inspector-misaligned-fovs");
+        const fovInspectorPreviousButton = document.getElementById("fov-inspector-previous");
+        const fovInspectorNextButton = document.getElementById("fov-inspector-next");
+        const fovInspectorPosition = document.getElementById("fov-inspector-position");
+        const fovInspectorStatus = document.getElementById("fov-inspector-status");
+        const fovCornerImage = document.getElementById("fov-corner-image");
         const flowCellPanel = document.getElementById("flow-cell-panel");
         const flowCellPanelSubtitle = document.getElementById("flow-cell-panel-subtitle");
         const flowCellSelect = document.getElementById("flow-cell");
@@ -314,7 +361,13 @@
         // A photometry's plot never changes, so each one is drawn at most once per page load.
         const hybiscusPlotUrls = new Map();
         const alignmentPixelErrorsByAlignId = new Map();
+        // Keyed by fovCornerImageKey; each FOV is fetched at most once, though several share a request.
+        const fovCornerImagePromises = new Map();
+        let inspectedFovIds = [];
+        let inspectedFovIndex = 0;
         let selectedImagingRun = null;
+        // Null until the first run is selected, which opens every section; after that each section stays as the user left it.
+        let userSectionOpenStates = null;
         let shownImagingRuns = [];
         let shownFlowCells = [];
         let selectedFlowCell = null;
@@ -345,14 +398,19 @@
                 .join("\n");
         }
 
-        function misalignedFovCount(imagingRun) {
+        function misalignedFovIds(imagingRun) {
             const misalignedPxThreshold = misalignedPxThresholdInput.valueAsNumber;
-            if (Number.isNaN(misalignedPxThreshold)) {
+            return imagingRun.fov_max_px_errors
+                .map((pxError, fovIndex) => ({ pxError, fovId: fovIndex + 1 }))
+                .filter(({ pxError }) => pxError !== null && pxError > misalignedPxThreshold)
+                .map(({ fovId }) => fovId);
+        }
+
+        function misalignedFovCount(imagingRun) {
+            if (Number.isNaN(misalignedPxThresholdInput.valueAsNumber)) {
                 return "–";
             }
-            return imagingRun.fov_max_px_errors
-                .filter((pxError) => pxError !== null && pxError > misalignedPxThreshold)
-                .length;
+            return misalignedFovIds(imagingRun).length;
         }
 
         function channelWavelength(channel) {
@@ -387,8 +445,9 @@
                 showSize();
                 localStorage.setItem(sizeControl.storageKey, String(sizePx));
             }
-            decreaseButton.addEventListener("click", () => changeSize(-1));
-            increaseButton.addEventListener("click", () => changeSize(1));
+            const stepPx = sizeControl.stepPx ?? 1;
+            decreaseButton.addEventListener("click", () => changeSize(-stepPx));
+            increaseButton.addEventListener("click", () => changeSize(stepPx));
             showSize();
         }
 
@@ -793,6 +852,7 @@
                     width: 1,
                     height: 1,
                     fill: pxErrorColor(fovPxError(alignmentPixelErrors, axis, channel, fovIndex)),
+                    "data-fov-id": fovIndex + 1,
                 });
                 const tooltip = svgElement("title", {});
                 tooltip.textContent = [
@@ -1019,6 +1079,211 @@
             flowCellChannelSelect.addEventListener("change", redrawSelectedFlowCellHeatmaps);
         }
 
+        function fovCornerImageKey(alignId, fovId) {
+            return `${alignId} FOV ${fovId}`;
+        }
+
+        function fetchFovCornerImages(alignId, fovIds) {
+            const fovIdParameters = new URLSearchParams(fovIds.map((fovId) => ["fov_ids", fovId]));
+            const fovCornerImagesPromise = fetch(`/alignments/${encodeURIComponent(alignId)}/fov-corner-images?${fovIdParameters}`)
+                .then(async (response) => {
+                    if (!response.ok) {
+                        throw new Error(`Error ${response.status}: ${await responseErrorText(response)}`);
+                    }
+                    return response.json();
+                });
+            for (const fovId of fovIds) {
+                const key = fovCornerImageKey(alignId, fovId);
+                const fovCornerImagePromise = fovCornerImagesPromise.then(
+                    (fovCornerImages) => ({ fovCornerImages, fov: fovCornerImages.fovs.find((fov) => fov.fov_id === fovId) }),
+                    (error) => {
+                        // Forgotten, so showing the FOV again retries it.
+                        fovCornerImagePromises.delete(key);
+                        throw error;
+                    }
+                );
+                // Only the shown FOV's failure is reported; the others would otherwise log unhandled rejections.
+                fovCornerImagePromise.catch(() => {});
+                fovCornerImagePromises.set(key, fovCornerImagePromise);
+            }
+        }
+
+        function showFovInspectorStatus(message, isError) {
+            fovInspectorStatus.className = `${isError ? "text-danger" : "text-body-secondary"} small mb-2`;
+            fovInspectorStatus.textContent = message;
+        }
+
+        function fovCornerImageBox(box, stroke) {
+            // imshow centers pixel i on coordinate i, but SVG starts it there, so the boxes move by half a pixel.
+            return svgElement("rect", { x: box.x + 0.5, y: box.y + 0.5, width: box.width, height: box.height, stroke });
+        }
+
+        function drawFovCornerImage(fovCornerImages, fov) {
+            const { image_width: imageWidth, image_height: imageHeight } = fovCornerImages;
+            const image = svgElement("svg", {
+                viewBox: `0 0 ${imageWidth} ${imageHeight}`,
+                role: "img",
+                "aria-label": `Corners of FOV ${fov.fov_id}'s aligned image`,
+            });
+            image.append(svgElement("image", {
+                href: `data:image/png;base64,${fov.corner_image_png}`,
+                width: imageWidth,
+                height: imageHeight,
+                style: "image-rendering: pixelated;",
+            }));
+            // Drawn in the notebook's order, so the red boxes stay on top.
+            image.append(...fov.located_subgrid_boxes.map((box) => fovCornerImageBox(box, box.tracked ? "white" : "black")));
+            image.append(...fovCornerImages.expected_subgrid_corner_boxes.map((box) => fovCornerImageBox(box, "red")));
+            for (const channelTile of fovCornerImages.channel_tiles) {
+                const channelLabel = svgElement("text", {
+                    x: channelTile.x + 4,
+                    y: channelTile.y + 14,
+                    "font-size": 12,
+                    fill: "white",
+                    stroke: "black",
+                    "stroke-width": 3,
+                    "paint-order": "stroke",
+                });
+                channelLabel.textContent = channelTile.channel;
+                image.append(channelLabel);
+            }
+            fovCornerImage.replaceChildren(image);
+        }
+
+        async function showInspectedFov() {
+            fovInspectorPreviousButton.disabled = inspectedFovIds.length < 2;
+            fovInspectorNextButton.disabled = inspectedFovIds.length < 2;
+            fovCornerImage.replaceChildren();
+            if (inspectedFovIds.length === 0) {
+                fovInspectorPosition.textContent = "";
+                return;
+            }
+            const imagingRun = selectedImagingRun;
+            const alignId = imagingRun.align_id;
+            const fovId = inspectedFovIds[inspectedFovIndex];
+            fovInspectorPosition.textContent = `FOV ${fovId} · ${inspectedFovIndex + 1} of ${inspectedFovIds.length}`;
+            const fovIdsFromInspectedFov = [...inspectedFovIds.slice(inspectedFovIndex), ...inspectedFovIds.slice(0, inspectedFovIndex)];
+            const unfetchedFovIds = fovIdsFromInspectedFov
+                .filter((otherFovId) => !fovCornerImagePromises.has(fovCornerImageKey(alignId, otherFovId)))
+                .slice(0, MAX_FOV_IDS_PER_REQUEST);
+            if (unfetchedFovIds.length > 0) {
+                showFovInspectorStatus(`Fetching the corner images of ${unfetchedFovIds.length} FOVs…`, false);
+                fetchFovCornerImages(alignId, unfetchedFovIds);
+            }
+            const isStillInspected = () => selectedImagingRun === imagingRun && inspectedFovIds[inspectedFovIndex] === fovId;
+            try {
+                const { fovCornerImages, fov } = await fovCornerImagePromises.get(fovCornerImageKey(alignId, fovId));
+                if (isStillInspected()) {
+                    showFovInspectorStatus("", false);
+                    drawFovCornerImage(fovCornerImages, fov);
+                }
+            } catch (error) {
+                if (isStillInspected()) {
+                    showFovInspectorStatus("Could not fetch the corner images. " + String(error.message ?? error), true);
+                }
+            }
+        }
+
+        function inspectFovs(fovIds, fovIndex) {
+            inspectedFovIds = fovIds;
+            inspectedFovIndex = fovIndex;
+            fovInspectorFovIdsInput.value = fovIds.join(", ");
+            showFovInspectorStatus("", false);
+            showInspectedFov();
+        }
+
+        function inspectMisalignedFovs() {
+            const fovIds = misalignedFovIds(selectedImagingRun);
+            inspectFovs(fovIds, 0);
+            if (fovIds.length === 0) {
+                showFovInspectorStatus(
+                    `No FOVs are misaligned by more than ${misalignedPxThresholdInput.value} px. `
+                        + "Enter FOV numbers, or click an FOV in the alignment pixel errors plots.",
+                    false
+                );
+            }
+        }
+
+        function fovIdsFromText(fovIdsText) {
+            const fovIds = fovIdsText.split(/[\s,]+/).filter(Boolean).map(Number);
+            if (fovIds.some((fovId) => !Number.isInteger(fovId) || fovId < 1 || fovId > FOVS_PER_CHIP)) {
+                return null;
+            }
+            return [...new Set(fovIds)];
+        }
+
+        function inspectFovsFromForm(event) {
+            event.preventDefault();
+            if (selectedImagingRun === null) {
+                return;
+            }
+            const fovIds = fovIdsFromText(fovInspectorFovIdsInput.value);
+            if (fovIds === null || fovIds.length === 0) {
+                showFovInspectorStatus(`Enter FOV numbers from 1 to ${FOVS_PER_CHIP}, separated by commas.`, true);
+                return;
+            }
+            inspectFovs(fovIds, 0);
+        }
+
+        function inspectClickedHeatmapFov(event) {
+            const fovId = Number(event.target.closest("rect")?.dataset.fovId);
+            if (!fovId || selectedImagingRun === null) {
+                return;
+            }
+            const fovIds = inspectedFovIds.includes(fovId) ? inspectedFovIds : [...inspectedFovIds, fovId].sort((first, second) => first - second);
+            inspectFovs(fovIds, fovIds.indexOf(fovId));
+            fovInspectorSection.open = true;
+            fovInspectorSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+
+        function stepInspectedFov(step) {
+            if (inspectedFovIds.length < 2) {
+                return;
+            }
+            inspectedFovIndex = (inspectedFovIndex + step + inspectedFovIds.length) % inspectedFovIds.length;
+            showInspectedFov();
+        }
+
+        function stepInspectedFovByKey(event) {
+            const isTyping = event.target.closest?.("input, textarea, select");
+            if (!fovInspectorSection.open || isTyping || event.ctrlKey || event.metaKey || event.altKey) {
+                return;
+            }
+            // The notebook's FOV inspector steps with the same keys.
+            if (event.key === "j") {
+                stepInspectedFov(-1);
+            } else if (event.key === "k") {
+                stepInspectedFov(1);
+            }
+        }
+
+        function clearFovInspector() {
+            inspectedFovIds = [];
+            inspectedFovIndex = 0;
+            fovInspectorFovIdsInput.value = "";
+            showFovInspectorStatus("", false);
+            showInspectedFov();
+        }
+
+        function setUpFovInspector() {
+            fovInspectorForm.addEventListener("submit", inspectFovsFromForm);
+            fovInspectorMisalignedFovsButton.addEventListener("click", () => {
+                if (selectedImagingRun !== null) {
+                    inspectMisalignedFovs();
+                }
+            });
+            fovInspectorPreviousButton.addEventListener("click", () => stepInspectedFov(-1));
+            fovInspectorNextButton.addEventListener("click", () => stepInspectedFov(1));
+            // Fetched only when opened, since reading the corner images takes a kernel of its own.
+            fovInspectorSection.addEventListener("toggle", () => {
+                if (fovInspectorSection.open && selectedImagingRun !== null && inspectedFovIds.length === 0) {
+                    inspectMisalignedFovs();
+                }
+            });
+            alignmentHeatmaps.addEventListener("click", inspectClickedHeatmapFov);
+            document.addEventListener("keydown", stepInspectedFovByKey);
+        }
+
         function selectedImagingRunTitleText(imagingRun) {
             const runStartDate = imagingRun.run_start.split("T")[0];
             const { runNameWithoutChip, chip } = runNameAndChip(imagingRun.run_name);
@@ -1026,6 +1291,9 @@
         }
 
         function showNoSelectedImagingRun() {
+            if (selectedImagingRun !== null) {
+                userSectionOpenStates = selectedImagingRunSections.map((section) => section.open);
+            }
             selectedImagingRun = null;
             selectedImagingRunTitle.textContent = NO_SELECTED_IMAGING_RUN_TITLE;
             alignmentHeatmaps.replaceChildren();
@@ -1033,23 +1301,30 @@
             hybiscusPlot.classList.add("d-none");
             hybiscusPlotStatus.textContent = "";
             selectedImagingRunMetrics.replaceChildren();
-            for (const plotSection of selectedImagingRunPlotSections) {
-                plotSection.open = false;
+            clearFovInspector();
+            for (const section of selectedImagingRunSections) {
+                section.open = false;
             }
-            selectedImagingRunPanel.open = false;
         }
 
         function selectImagingRun(imagingRun, row) {
             for (const otherRow of imagingRunsBody.rows) {
                 otherRow.classList.toggle("table-active", otherRow === row);
             }
+            // Sections are collapsed while no run is shown, so they reopen as the user last left them.
+            if (selectedImagingRun === null) {
+                const sectionOpenStates = userSectionOpenStates ?? selectedImagingRunSections.map(() => true);
+                selectedImagingRunSections.forEach((section, sectionIndex) => {
+                    section.open = sectionOpenStates[sectionIndex];
+                });
+            }
             selectedImagingRun = imagingRun;
             selectedImagingRunTitle.textContent = selectedImagingRunTitleText(imagingRun);
             showSelectedImagingRunMetrics(imagingRun);
-            for (const plotSection of selectedImagingRunPlotSections) {
-                plotSection.open = true;
+            clearFovInspector();
+            if (fovInspectorSection.open) {
+                inspectMisalignedFovs();
             }
-            selectedImagingRunPanel.open = true;
             showHybiscusPlot(imagingRun);
             showAlignmentHeatmaps(imagingRun);
         }
@@ -1074,6 +1349,7 @@
             pxErrorColorScale.style.background = `linear-gradient(to right, ${PX_ERROR_COLORS.join(", ")})`;
         }
         setUpFlowCellControls();
+        setUpFovInspector();
         imagingRunQueryForm.elements.run_started_after.value = defaultRunStartedAfter();
         createImagingRunColumnCheckboxes();
         SIZE_CONTROLS.forEach(setUpSizeControl);

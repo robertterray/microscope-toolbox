@@ -12,11 +12,13 @@ from pydantic import BaseModel
 
 from microscope_toolbox import (
     alignment_pixel_errors,
+    fov_corner_images,
     hybiscus_plots,
     imaging_runs,
     notebook_runs,
 )
 from microscope_toolbox.alignment_pixel_errors import AlignmentPixelErrors
+from microscope_toolbox.fov_corner_images import FOVS_PER_CHIP, FovCornerImages
 from microscope_toolbox.imaging_run_query import (
     EXP_TYPES,
     MICROSCOPES,
@@ -34,6 +36,8 @@ KERNEL_FAILURES = (JupyterServerError, KernelCodeError, requests.RequestExceptio
 # One kernel fetches the alignments one after another, so a long list would hold
 # the request open for minutes.
 MAX_ALIGN_IDS_PER_REQUEST = 24
+# Each FOV's corner image is about 165 kB, and reading them holds the request open.
+MAX_FOV_IDS_PER_REQUEST = 24
 
 app = FastAPI(title="microscope_toolbox")
 
@@ -188,6 +192,30 @@ def list_alignment_pixel_errors(
     try:
         return alignment_pixel_errors.fetch_pixel_errors_of_alignments(
             jupyter_server_settings, align_ids
+        )
+    except (*KERNEL_FAILURES, pydantic.ValidationError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@app.get("/alignments/{align_id}/fov-corner-images", response_model=FovCornerImages)
+def get_fov_corner_images(
+    jupyter_server_settings: ConfiguredJupyterServerSettings,
+    align_id: Annotated[int, PathParameter(ge=1)],
+    fov_ids: Annotated[
+        List[Annotated[int, pydantic.Field(ge=1, le=FOVS_PER_CHIP)]],
+        Query(min_length=1, max_length=MAX_FOV_IDS_PER_REQUEST),
+    ],
+) -> FovCornerImages:
+    """The corners of the FOVs' aligned images, in the order of `fov_ids`.
+
+    What the alignment_QC notebook's FOV inspector shows: a tile per channel,
+    with boxes where the sub-grid's corners should be and where alignment QC
+    located the sub-grid. Reads them in a kernel on the Jupyter server and blocks
+    until it finishes.
+    """
+    try:
+        return fov_corner_images.fetch_fov_corner_images(
+            jupyter_server_settings, align_id, fov_ids
         )
     except (*KERNEL_FAILURES, pydantic.ValidationError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error

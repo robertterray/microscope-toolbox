@@ -437,3 +437,61 @@ def test_list_alignment_pixel_errors_rejects_invalid_align_ids(
     response = client.get("/alignments/pixel-errors" + align_ids_query)
     assert response.status_code == 422
     jupyter_server.log_in.assert_not_called()
+
+
+FOV_CORNER_IMAGES = {
+    "align_id": 21,
+    "image_width": 480,
+    "image_height": 320,
+    "channel_tiles": [{"channel": "AF405", "x": 0, "y": 0, "size": 160}],
+    "expected_subgrid_corner_boxes": [
+        {"x": 36.0, "y": 38.0, "width": 10.0, "height": 10.0}
+    ],
+    "fovs": [
+        {
+            "fov_id": 36,
+            "corner_image_png": base64.b64encode(b"\x89PNG corners").decode(),
+            "located_subgrid_boxes": [
+                {"x": 36.5, "y": 38.5, "width": 10.0, "height": 10.0, "tracked": True}
+            ],
+        }
+    ],
+}
+
+
+def test_get_fov_corner_images(jupyter_server: MagicMock) -> None:
+    kernel = remote_kernel(jupyter_server)
+    kernel.execute.return_value = json_cell_execution(FOV_CORNER_IMAGES)
+    response = client.get("/alignments/21/fov-corner-images?fov_ids=36")
+    assert response.status_code == 200
+    assert response.json() == FOV_CORNER_IMAGES
+    assert "fetch_fov_corner_images(21, [36], 80)" in kernel.execute.call_args.args[0]
+
+
+def test_get_fov_corner_images_with_failing_kernel_code(
+    jupyter_server: MagicMock,
+) -> None:
+    remote_kernel(jupyter_server).execute.return_value = CellExecution(
+        execution_count=1, error="RowNotFoundError: QC metrics not yet extracted"
+    )
+    response = client.get("/alignments/21/fov-corner-images?fov_ids=36")
+    assert response.status_code == 502
+    assert "QC metrics not yet extracted" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "fov_ids_query",
+    [
+        "",
+        "?fov_ids=0",
+        "?fov_ids=793",
+        "?fov_ids=x",
+        "?" + "&".join(["fov_ids=1"] * 25),
+    ],
+)
+def test_get_fov_corner_images_rejects_invalid_fov_ids(
+    jupyter_server: MagicMock, fov_ids_query: str
+) -> None:
+    response = client.get("/alignments/21/fov-corner-images" + fov_ids_query)
+    assert response.status_code == 422
+    jupyter_server.log_in.assert_not_called()

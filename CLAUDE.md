@@ -23,10 +23,21 @@ On top of that, this repo contains a small FastAPI web app:
 - **Alignment pixel errors**: an alignment's vertical and horizontal pixel error per channel and FOV,
   with each FOV's place on the chip, fetched in a kernel (`alignment_pixel_errors_in_kernel.py`).
   The page draws them as the notebook's "Alignment Error for All Channels" heatmaps.
+- **FOV corner images**: the alignment_QC notebook's "FOV inspector": the corners of FOVs' aligned
+  images, a tile per channel, with where the sub-grid's corners should be and where alignment QC
+  located it. `fov_corner_images_in_kernel.py` calls that notebook's own
+  `construct_sliceviewer_all_channels` (terray_notebooks' `utils/database_guis_align.py`) and returns
+  each FOV's image as a viridis PNG (about 165 kB) with the boxes as JSON, at most 24 FOVs per request
+  (about 15 s). The notebook steps through them in an interactive matplotlib viewer, which the
+  exported HTML can't run.
 - **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
-  runs table from `/imaging-runs`. Below it, the collapsible "Single chip analysis" section opens when
-  a row is selected and shows the run's metrics, its hybiscus plot and its alignment heatmaps (SVG,
-  with a tooltip per FOV). The Chip column links to the run in Well
+  runs table from `/imaging-runs`. Below it, the collapsible "Single chip analysis" section shows the
+  selected run's metrics, its hybiscus plot, its alignment heatmaps (SVG, with a tooltip per FOV)
+  and the "FOV inspector". The first selection after a page load opens all of these sections; after
+  that, each keeps the open or collapsed state the user left it in, also across new queries. The
+  FOV inspector fetches only while open (the misaligned FOVs at the table's threshold) or when an FOV
+  in the heatmaps is clicked; it fetches 24 FOVs at a time from the shown one, and steps with j/k
+  like the notebook. The Chip column links to the run in Well
   Watcher. The page no longer runs the notebook (`/notebook-runs` is API only), so the total
   alignment error across runs (the notebook's appendix) isn't on the page yet. The runs table
   counts misaligned FOVs in the browser, from each run's largest alignment error per FOV, so
@@ -57,6 +68,8 @@ On top of that, this repo contains a small FastAPI web app:
   hybiscus plot.
 - `microscope_toolbox/alignment_pixel_errors.py` and `alignment_pixel_errors_in_kernel.py`: the
   same split for the alignment pixel errors.
+- `microscope_toolbox/fov_corner_images.py` and `fov_corner_images_in_kernel.py`: the same split for
+  the FOV inspector's corner images.
 - `microscope_toolbox/remote_jupyter.py`: client for a remote Jupyter server: password login,
   sessions API and the kernel websocket.
 - `microscope_toolbox/notebooks/automations_qc_notebook.ipynb`: the notebook the app runs (see
@@ -64,7 +77,7 @@ On top of that, this repo contains a small FastAPI web app:
 - `microscope_toolbox/static/`: frontend, served at `/`. `index.html` is plain HTML + JS with no
   build step. `vendor/` holds a local copy of Bootstrap 5.3.3 CSS, so the page works offline.
 - `tests/`: pytest suite (`test_api.py`, `test_alignment_pixel_errors_in_kernel.py`,
-  `test_hybiscus_plots_in_kernel.py`,
+  `test_fov_corner_images_in_kernel.py`, `test_hybiscus_plots_in_kernel.py`,
   `test_imaging_run_query.py`, `test_imaging_runs_in_kernel.py`, `test_remote_jupyter.py`).
 
 ## API
@@ -79,6 +92,7 @@ On top of that, this repo contains a small FastAPI web app:
 | GET | `/photometries/{phot_id}/hybiscus-plot` | The photometry's hybiscus plot and histograms as a PNG (blocks, about 20 s); 422 for an invalid `phot_id`, 502 if the Jupyter server or the plotting fails |
 | GET | `/alignments/{align_id}/pixel-errors` | The alignment's vertical and horizontal pixel error per channel and FOV, with each FOV's chip position (blocks); 422 for an invalid `align_id`, 502 if the Jupyter server or the query fails |
 | GET | `/alignments/pixel-errors` | Like the route above for several `align_ids` (up to 24), fetched in one kernel; 422 for missing or invalid ids |
+| GET | `/alignments/{align_id}/fov-corner-images` | The FOV inspector's corner images and boxes for `fov_ids` (1 to 24 FOVs, each 1–792) (blocks, about 15 s); 422 for invalid ids, 502 if the Jupyter server or the reading fails |
 | GET | `/docs` | Auto-generated OpenAPI docs |
 
 The static files are mounted at `/` after all the routes, so new API routes must be defined above
