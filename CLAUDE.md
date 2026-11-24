@@ -24,8 +24,9 @@ On top of that, this repo contains a small FastAPI web app:
   with each FOV's place on the chip, fetched in a kernel (`alignment_pixel_errors_in_kernel.py`).
   The page draws them as the notebook's "Alignment Error for All Channels" heatmaps.
 - **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
-  runs table from `/imaging-runs`; selecting a row shows the run's metrics, its hybiscus plot and its
-  alignment heatmaps (SVG, with a tooltip per FOV). The Chip column links to the run in Well
+  runs table from `/imaging-runs`. Below it, the collapsible "Single chip analysis" section opens when
+  a row is selected and shows the run's metrics, its hybiscus plot and its alignment heatmaps (SVG,
+  with a tooltip per FOV). The Chip column links to the run in Well
   Watcher. The page no longer runs the notebook (`/notebook-runs` is API only), so the total
   alignment error across runs (the notebook's appendix) isn't on the page yet. The runs table
   counts misaligned FOVs in the browser, from each run's largest alignment error per FOV, so
@@ -34,7 +35,8 @@ On top of that, this repo contains a small FastAPI web app:
   (`FLOW_CELL_ROW_EXP_LGIDS` in `index.html`: 145127, 145128, 145129) and each chip is a row of the
   runs table. The page finds flow cells among the shown runs: all 12 chips on one microscope under
   one run name (without its `ChipN` suffix), with at most `MAX_MINUTES_BETWEEN_FLOW_CELL_CHIPS`
-  between one chip's run end and the next chip's start. Selecting one draws its 12 heatmaps for one
+  between one chip's run end and the next chip's start. In the collapsible "12-chip flow cell
+  alignment" section, selecting one draws its 12 heatmaps for one
   axis and channel, fetched together from `/alignments/pixel-errors`.
 
 <!-- TODO: describe who uses this app and what it is for. -->

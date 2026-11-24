@@ -86,7 +86,7 @@
                     <span class="text-body-secondary">An FOV is misaligned when a channel tracked in both axes is off by more than this.</span>
                 </div>
                 <details class="small mb-2">
-                    <summary>Columns</summary>
+                    <summary>Column filters</summary>
                     <div id="imaging-run-column-checkboxes" class="d-flex flex-wrap align-items-start column-gap-5 row-gap-3 mt-2"></div>
                 </details>
                 <div class="d-flex flex-wrap justify-content-end align-items-center gap-3 small mb-2">
@@ -114,45 +114,54 @@
             </div>
         </div>
 
-        <div class="card shadow-sm mt-3 d-none" id="selected-imaging-run-panel">
-            <div class="card-body">
-                <h2 class="h5 card-title" id="selected-imaging-run-title"></h2>
-                <details class="mb-3" open>
-                    <summary class="h6">Alignment pixel errors plots</summary>
-                    <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
-                        <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors.</span>
-                        <span>≤ −3 px</span>
-                        <span class="px-error-color-scale rounded border"></span>
-                        <span>≥ 3 px</span>
-                        <div class="input-group input-group-sm w-auto ms-auto">
-                            <span class="input-group-text">Plot size</span>
-                            <button id="heatmap-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller plots">−</button>
-                            <output id="heatmap-fov-size" class="input-group-text"></output>
-                            <button id="heatmap-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger plots">+</button>
+        <div class="card shadow-sm mt-3">
+            <details class="card-body" id="selected-imaging-run-panel">
+                <summary>
+                    <h2 class="h5 card-title d-inline">Single chip analysis</h2>
+                    <p class="h6 text-body-secondary mt-2 mb-0" id="selected-imaging-run-title"></p>
+                </summary>
+                <div id="selected-imaging-run-plots" class="mt-3">
+                    <details class="mb-3">
+                        <summary class="h6">Alignment pixel errors plots</summary>
+                        <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
+                            <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors.</span>
+                            <span>≤ −3 px</span>
+                            <span class="px-error-color-scale rounded border"></span>
+                            <span>≥ 3 px</span>
+                            <div class="input-group input-group-sm w-auto ms-auto">
+                                <span class="input-group-text">Plot size</span>
+                                <button id="heatmap-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller plots">−</button>
+                                <output id="heatmap-fov-size" class="input-group-text"></output>
+                                <button id="heatmap-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger plots">+</button>
+                            </div>
                         </div>
-                    </div>
-                    <div id="alignment-heatmaps-status" class="text-body-secondary small mb-2"></div>
-                    <div id="alignment-heatmaps" class="d-flex flex-wrap column-gap-5 row-gap-3"></div>
-                </details>
-                <details open>
-                    <summary class="h6">Hybiscus plot and metrics</summary>
-                    <div class="row g-3 align-items-center">
-                        <div class="col-lg-8">
-                            <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
-                            <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
+                        <div id="alignment-heatmaps-status" class="text-body-secondary small mb-2"></div>
+                        <div id="alignment-heatmaps" class="d-flex flex-wrap column-gap-5 row-gap-3"></div>
+                    </details>
+                    <details>
+                        <summary class="h6">Hybiscus plot and metrics</summary>
+                        <p class="small text-body-secondary mb-2">The hybiscus plot and per-channel histograms of the run's latest photometry, beside the run's IDs and QC metrics. Drawing the plot takes about 20 seconds.</p>
+                        <div class="row g-3 align-items-center">
+                            <div class="col-lg-8">
+                                <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
+                                <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
+                            </div>
+                            <div class="col-lg-4">
+                                <dl id="selected-imaging-run-metrics" class="row small mb-0"></dl>
+                            </div>
                         </div>
-                        <div class="col-lg-4">
-                            <dl id="selected-imaging-run-metrics" class="row small mb-0"></dl>
-                        </div>
-                    </div>
-                </details>
-            </div>
+                    </details>
+                </div>
+            </details>
         </div>
 
-        <div class="card shadow-sm mt-3" id="flow-cell-panel">
-            <div class="card-body">
-                <h2 class="h5 card-title">Flow cell alignment</h2>
-                <p id="flow-cell-description" class="text-body-secondary small"></p>
+        <div class="card shadow-sm mt-3">
+            <details class="card-body" id="flow-cell-panel" open>
+                <summary>
+                    <h2 class="h5 card-title d-inline">12-chip flow cell alignment</h2>
+                    <p class="h6 text-body-secondary mt-2 mb-0" id="flow-cell-panel-subtitle"></p>
+                </summary>
+                <p id="flow-cell-description" class="text-body-secondary small mt-2"></p>
                 <div class="row g-3 mb-3">
                     <div class="col-12 col-md-6">
                         <label for="flow-cell" class="form-label">Flow cell</label>
@@ -181,7 +190,7 @@
                 </div>
                 <div id="flow-cell-heatmaps-status" class="text-body-secondary small mb-2"></div>
                 <div id="flow-cell-heatmaps" class="column-gap-2 row-gap-2"></div>
-            </div>
+            </details>
         </div>
     </div>
 
@@ -196,6 +205,8 @@
         const PX_ERROR_COLOR_LIMIT = 3;
         const PX_ERROR_COLORS = ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"];
         const UNMEASURED_PX_ERROR_COLOR = "#adb5bd";
+        const NO_SELECTED_IMAGING_RUN_TITLE = "Please click on a row in the data table above to display plots.";
+        const NO_FLOW_CELLS_TEXT = "No 12-chip runs found in the data table";
         const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
         // A flow cell holds 3 rows of 4 chips, and each row is imaged under its own LG number.
         const FLOW_CELL_ROW_EXP_LGIDS = [145127, 145128, 145129];
@@ -271,7 +282,7 @@
             { name: "header-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-header-font-size", storageKey: "imagingRunsHeaderFontSizePx", defaultSizePx: 14, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "cell-font", sizedElementId: "imaging-runs-table", cssProperty: "--imaging-runs-cell-font-size", storageKey: "imagingRunsCellFontSizePx", defaultSizePx: 16, sizeLimitsPx: TABLE_FONT_SIZE_LIMITS_PX },
             { name: "heatmap-fov", sizedElementId: "alignment-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "heatmapFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 4, max: 30 } },
-            { name: "flow-cell-fov", sizedElementId: "flow-cell-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "flowCellFovSizePx", defaultSizePx: 9, sizeLimitsPx: { min: 2, max: 30 } },
+            { name: "flow-cell-fov", sizedElementId: "flow-cell-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "flowCellFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 2, max: 30 } },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
         const showImagingRunsButton = document.getElementById("show-imaging-runs-button");
@@ -287,11 +298,14 @@
         const imagingRunsTable = document.getElementById("imaging-runs-table");
         const selectedImagingRunPanel = document.getElementById("selected-imaging-run-panel");
         const selectedImagingRunTitle = document.getElementById("selected-imaging-run-title");
+        const selectedImagingRunPlotSections = document.querySelectorAll("#selected-imaging-run-plots > details");
         const selectedImagingRunMetrics = document.getElementById("selected-imaging-run-metrics");
         const hybiscusPlotStatus = document.getElementById("hybiscus-plot-status");
         const hybiscusPlot = document.getElementById("hybiscus-plot");
         const alignmentHeatmapsStatus = document.getElementById("alignment-heatmaps-status");
         const alignmentHeatmaps = document.getElementById("alignment-heatmaps");
+        const flowCellPanel = document.getElementById("flow-cell-panel");
+        const flowCellPanelSubtitle = document.getElementById("flow-cell-panel-subtitle");
         const flowCellSelect = document.getElementById("flow-cell");
         const flowCellAxisSelect = document.getElementById("flow-cell-axis");
         const flowCellChannelSelect = document.getElementById("flow-cell-channel");
@@ -649,7 +663,7 @@
             }));
             showSelectedImagingRunColumns();
             showFlowCells(findFlowCells(imagingRuns));
-            selectedImagingRunPanel.classList.add("d-none");
+            showNoSelectedImagingRun();
             imagingRunsPanel.classList.remove("d-none");
         }
 
@@ -920,8 +934,11 @@
             flowCellHeatmaps.replaceChildren();
             flowCellHeatmapsStatus.className = "text-body-secondary small mb-2";
             flowCellHeatmapsStatus.textContent = "";
+            flowCellPanelSubtitle.textContent = NO_FLOW_CELLS_TEXT + ".";
+            flowCellPanelSubtitle.classList.toggle("d-none", flowCells.length > 0);
+            flowCellPanel.open = flowCells.length > 0;
             if (flowCells.length === 0) {
-                flowCellSelect.replaceChildren(new Option("No flow cells among these imaging runs", ""));
+                flowCellSelect.replaceChildren(new Option(NO_FLOW_CELLS_TEXT, ""));
                 flowCellSelect.disabled = true;
                 return;
             }
@@ -1008,6 +1025,20 @@
             return `${runStartDate}/${runNameWithoutChip}/LG${imagingRun.exp_lgid}/Chip ${chip ?? "–"}`;
         }
 
+        function showNoSelectedImagingRun() {
+            selectedImagingRun = null;
+            selectedImagingRunTitle.textContent = NO_SELECTED_IMAGING_RUN_TITLE;
+            alignmentHeatmaps.replaceChildren();
+            alignmentHeatmapsStatus.textContent = "";
+            hybiscusPlot.classList.add("d-none");
+            hybiscusPlotStatus.textContent = "";
+            selectedImagingRunMetrics.replaceChildren();
+            for (const plotSection of selectedImagingRunPlotSections) {
+                plotSection.open = false;
+            }
+            selectedImagingRunPanel.open = false;
+        }
+
         function selectImagingRun(imagingRun, row) {
             for (const otherRow of imagingRunsBody.rows) {
                 otherRow.classList.toggle("table-active", otherRow === row);
@@ -1015,7 +1046,10 @@
             selectedImagingRun = imagingRun;
             selectedImagingRunTitle.textContent = selectedImagingRunTitleText(imagingRun);
             showSelectedImagingRunMetrics(imagingRun);
-            selectedImagingRunPanel.classList.remove("d-none");
+            for (const plotSection of selectedImagingRunPlotSections) {
+                plotSection.open = true;
+            }
+            selectedImagingRunPanel.open = true;
             showHybiscusPlot(imagingRun);
             showAlignmentHeatmaps(imagingRun);
         }
