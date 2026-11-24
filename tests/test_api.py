@@ -28,7 +28,7 @@ def test_health() -> None:
 def test_index_page() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Run Notebook" in response.text
+    assert "Show Imaging Runs" in response.text
 
 
 def test_notebook_has_query_params_cell_and_kernel() -> None:

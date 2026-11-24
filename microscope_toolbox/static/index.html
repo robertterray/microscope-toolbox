@@ -25,47 +25,44 @@
     </style>
 </head>
 <body class="bg-body-tertiary">
-    <div class="container py-5" style="max-width: 540px;">
+    <div class="container-fluid py-4">
         <div class="card shadow-sm">
             <div class="card-body">
                 <h1 class="h3 card-title mb-3">Automations QC</h1>
                 <form id="imaging-run-query-form">
                     <p class="text-body-secondary small">Select imaging runs. Leave a field empty to skip that restriction.</p>
-                    <div class="mb-3">
-                        <label for="run-started-after" class="form-label">Run started after</label>
-                        <input id="run-started-after" name="run_started_after" type="date" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label for="microscope" class="form-label">Microscope</label>
-                        <select id="microscope" name="microscope" class="form-select">
-                            <option value="">Any microscope</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="exp-lgids" class="form-label">LabGuru experiment IDs (LG numbers)</label>
-                        <input id="exp-lgids" name="exp_lgids" inputmode="numeric" pattern="\s*\d+(\s*,\s*\d+)*\s*,?\s*" title="LG numbers separated by commas" placeholder="145127,145128,145129" class="form-control">
-                        <div class="form-text">Separate several LG numbers with commas. The suggestion is the stage testing script's LG numbers; press Tab in the empty field to use it.</div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="run-name-contains" class="form-label">Run name contains</label>
-                        <input id="run-name-contains" name="run_name_contains" class="form-control">
-                        <div class="form-text">When using the stage testing script, use the <code>SNXXXX</code> prefix. <code>%</code> matches any sequence of characters.</div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="exp-type" class="form-label">Experiment type</label>
-                        <select id="exp-type" name="exp_type" class="form-select">
-                            <option value="">Any experiment type</option>
-                        </select>
+                    <div class="row g-3 mb-3">
+                        <div class="col-12 col-sm-6 col-lg">
+                            <label for="run-started-after" class="form-label">Run started after</label>
+                            <input id="run-started-after" name="run_started_after" type="date" class="form-control">
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg">
+                            <label for="microscope" class="form-label">Microscope</label>
+                            <select id="microscope" name="microscope" class="form-select">
+                                <option value="">Any microscope</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg">
+                            <label for="exp-lgids" class="form-label">LabGuru experiment IDs (LG numbers)</label>
+                            <input id="exp-lgids" name="exp_lgids" inputmode="numeric" pattern="\s*\d+(\s*,\s*\d+)*\s*,?\s*" title="LG numbers separated by commas" placeholder="145127,145128,145129" class="form-control">
+                            <div class="form-text">Separate several LG numbers with commas. The suggestion is the stage testing script's LG numbers; press Tab in the empty field to use it.</div>
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg">
+                            <label for="run-name-contains" class="form-label">Run name contains</label>
+                            <input id="run-name-contains" name="run_name_contains" class="form-control">
+                            <div class="form-text">When using the stage testing script, use the <code>SNXXXX</code> prefix. <code>%</code> matches any sequence of characters.</div>
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg">
+                            <label for="exp-type" class="form-label">Experiment type</label>
+                            <select id="exp-type" name="exp_type" class="form-select">
+                                <option value="">Any experiment type</option>
+                            </select>
+                        </div>
                     </div>
                     <button id="show-imaging-runs-button" type="submit" class="btn btn-primary">
                         <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
                         Show Imaging Runs
                     </button>
-                    <button id="run-notebook-button" type="submit" class="btn btn-outline-secondary">
-                        <span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span>
-                        Run Notebook
-                    </button>
-                    <div class="form-text">Run Notebook also draws the total alignment error across runs, but its table rows can't be selected.</div>
                 </form>
                 <div id="query-alert" class="alert mt-3 mb-0 d-none" role="alert">
                     <div id="query-alert-title" class="fw-semibold"></div>
@@ -150,11 +147,6 @@
         </div>
     </div>
 
-    <div class="container-fluid pb-5 d-none" id="executed-notebook-panel">
-        <!-- Sandboxed without allow-same-origin so the notebook's own CSS and scripts can't touch this page. -->
-        <iframe id="executed-notebook" class="w-100 border rounded bg-white" style="height: 80vh;" sandbox="allow-scripts" title="Executed notebook"></iframe>
-    </div>
-
     <script>
         const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgids", "run_name_contains", "exp_type"];
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
@@ -237,10 +229,8 @@
             { name: "heatmap-fov", sizedElementId: "alignment-heatmaps", cssProperty: "--heatmap-fov-size", storageKey: "heatmapFovSizePx", defaultSizePx: 12, sizeLimitsPx: { min: 4, max: 30 } },
         ];
         const imagingRunQueryForm = document.getElementById("imaging-run-query-form");
-        const queryButtons = [
-            document.getElementById("show-imaging-runs-button"),
-            document.getElementById("run-notebook-button"),
-        ];
+        const showImagingRunsButton = document.getElementById("show-imaging-runs-button");
+        const showImagingRunsSpinner = showImagingRunsButton.querySelector(".spinner-border");
         const queryAlert = document.getElementById("query-alert");
         const queryAlertTitle = document.getElementById("query-alert-title");
         const queryAlertBody = document.getElementById("query-alert-body");
@@ -257,8 +247,6 @@
         const hybiscusPlot = document.getElementById("hybiscus-plot");
         const alignmentHeatmapsStatus = document.getElementById("alignment-heatmaps-status");
         const alignmentHeatmaps = document.getElementById("alignment-heatmaps");
-        const executedNotebookPanel = document.getElementById("executed-notebook-panel");
-        const executedNotebook = document.getElementById("executed-notebook");
         // A photometry's plot never changes, so each one is drawn at most once per page load.
         const hybiscusPlotUrls = new Map();
         const alignmentPixelErrorsByAlignId = new Map();
@@ -809,11 +797,6 @@
             showAlignmentHeatmaps(imagingRun);
         }
 
-        function showExecutedNotebook(notebookHtml) {
-            executedNotebook.srcdoc = notebookHtml;
-            executedNotebookPanel.classList.remove("d-none");
-        }
-
         async function showImagingRunsMatchingForm() {
             showQueryAlert("secondary", "Finding imaging runs…", "");
             const response = await fetch("/imaging-runs?" + imagingRunQueryParameters());
@@ -828,27 +811,6 @@
             }
             showQueryAlert("success", `${imagingRuns.length} imaging runs`, "");
             showImagingRuns(imagingRuns);
-        }
-
-        async function runNotebookWithForm() {
-            showQueryAlert("secondary", "Running the notebook…", "");
-            const response = await fetch("/notebook-runs", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(imagingRunQueryFromForm()),
-            });
-            const notebookRun = await response.json();
-            if (!response.ok) {
-                showQueryAlert("danger", "Error " + response.status, errorDetailText(notebookRun.detail ?? notebookRun));
-            } else if (notebookRun.no_matching_imaging_runs) {
-                showQueryAlert("warning", "No imaging runs match", imagingRunQueryDescription());
-            } else if (notebookRun.succeeded) {
-                showQueryAlert("success", "Finished", notebookRun.executed_notebook_path);
-                showExecutedNotebook(notebookRun.html);
-            } else {
-                showQueryAlert("danger", "A cell failed", notebookRun.error);
-                showExecutedNotebook(notebookRun.html);
-            }
         }
 
         document.getElementById("px-error-color-scale").style.background = `linear-gradient(to right, ${PX_ERROR_COLORS.join(", ")})`;
@@ -871,24 +833,16 @@
 
         imagingRunQueryForm.addEventListener("submit", async (event) => {
             event.preventDefault();
-            // Enter in a field submits with the first button, Show Imaging Runs.
-            const clickedButton = event.submitter ?? queryButtons[0];
-            const clickedButtonSpinner = clickedButton.querySelector(".spinner-border");
-            queryButtons.forEach((button) => { button.disabled = true; });
-            clickedButtonSpinner.classList.remove("d-none");
+            showImagingRunsButton.disabled = true;
+            showImagingRunsSpinner.classList.remove("d-none");
             imagingRunsPanel.classList.add("d-none");
-            executedNotebookPanel.classList.add("d-none");
             try {
-                if (clickedButton.id === "run-notebook-button") {
-                    await runNotebookWithForm();
-                } else {
-                    await showImagingRunsMatchingForm();
-                }
+                await showImagingRunsMatchingForm();
             } catch (error) {
                 showQueryAlert("danger", "Request failed", String(error));
             } finally {
-                queryButtons.forEach((button) => { button.disabled = false; });
-                clickedButtonSpinner.classList.add("d-none");
+                showImagingRunsButton.disabled = false;
+                showImagingRunsSpinner.classList.add("d-none");
             }
         });
     </script>

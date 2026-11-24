@@ -26,8 +26,8 @@ On top of that, this repo contains a small FastAPI web app:
 - **Web page**: a single static page with an imaging run query form. "Show Imaging Runs" shows the
   runs table from `/imaging-runs`; selecting a row shows the run's metrics, its hybiscus plot and its
   alignment heatmaps (SVG, with a tooltip per FOV). The Chip column links to the run in Well
-  Watcher. "Run Notebook" runs the notebook and shows its output, including the total alignment
-  error across runs (the notebook's appendix), which the page doesn't have yet. The runs table
+  Watcher. The page no longer runs the notebook (`/notebook-runs` is API only), so the total
+  alignment error across runs (the notebook's appendix) isn't on the page yet. The runs table
   counts misaligned FOVs in the browser, from each run's largest alignment error per FOV, so
   changing the threshold doesn't rerun the query.
 
