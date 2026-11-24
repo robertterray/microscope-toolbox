@@ -118,18 +118,17 @@
             <div class="card-body">
                 <h2 class="h5 card-title" id="selected-imaging-run-title"></h2>
                 <details class="mb-3" open>
-                    <summary class="h6">Alignment pixel errors</summary>
+                    <summary class="h6">Alignment pixel errors plots</summary>
                     <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary mb-2">
-                        <span>Each block is an FOV, placed as on the chip. Hover over one for its number and errors.</span>
+                        <span>Each square shows one FOV at its position on the chip; hover to see its number and pixel errors.</span>
                         <span>≤ −3 px</span>
                         <span id="px-error-color-scale" class="rounded border"></span>
                         <span>≥ 3 px</span>
-                        <span>Gray: not measured.</span>
                         <div class="input-group input-group-sm w-auto ms-auto">
-                            <span class="input-group-text">Block size</span>
-                            <button id="heatmap-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller heatmap blocks">−</button>
+                            <span class="input-group-text">Plot size</span>
+                            <button id="heatmap-fov-size-decrease" type="button" class="btn btn-outline-secondary" aria-label="Smaller plots">−</button>
                             <output id="heatmap-fov-size" class="input-group-text"></output>
-                            <button id="heatmap-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger heatmap blocks">+</button>
+                            <button id="heatmap-fov-size-increase" type="button" class="btn btn-outline-secondary" aria-label="Larger plots">+</button>
                         </div>
                     </div>
                     <div id="alignment-heatmaps-status" class="text-body-secondary small mb-2"></div>
@@ -137,7 +136,7 @@
                 </details>
                 <details open>
                     <summary class="h6">Hybiscus plot and metrics</summary>
-                    <div class="row g-3">
+                    <div class="row g-3 align-items-center">
                         <div class="col-lg-8">
                             <div id="hybiscus-plot-status" class="text-body-secondary small mb-2"></div>
                             <img id="hybiscus-plot" class="img-fluid d-none" alt="Hybiscus plot and histograms">
@@ -160,58 +159,62 @@
         const IMAGING_RUN_QUERY_FIELDS = ["run_started_after", "microscope", "exp_lgids", "run_name_contains", "exp_type"];
         const DEFAULT_RUN_STARTED_DAYS_AGO = 7;
         const WELL_WATCHER_FOV_METRICS_URL = "https://well-watcher.app.terraytx.com/FOV_Metrics?rawimg_id=";
-        const CHANNELS = ["AF405", "AF458", "AF568", "AF633", "AF750"];
+        // Intensities and vignette scores are never calculated for AF405, so it gets no columns.
+        const CHANNELS = ["AF458", "AF568", "AF633", "AF750"];
         const ALIGNMENT_AXES = [{ name: "vert", label: "Vertical" }, { name: "horz", label: "Horizontal" }];
         // The notebook's heatmaps use Vega's "redblue" scheme over -3 to 3 px, clamping larger errors.
         const PX_ERROR_COLOR_LIMIT = 3;
         const PX_ERROR_COLORS = ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"];
         const UNMEASURED_PX_ERROR_COLOR = "#adb5bd";
         const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+        // Saved frozen columns refer to columns by key, so a key must stay the same when its label changes.
         const IMAGING_RUN_COLUMN_GROUPS = [
             {
                 label: "Run Details",
                 columns: [
-                    { label: "Run start", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
-                    { label: "Run name", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).runNameWithoutChip },
-                    { label: "LG number", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.exp_lgid },
-                    { label: "Chip", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).chip ?? "–", link: wellWatcherFovMetricsUrl },
-                    { label: "Microscope", shownByDefault: true, freezable: true, value: (imagingRun) => imagingRun.microscope },
-                    { label: "Duration (s)", shownByDefault: false, value: (imagingRun) => formatScore(imagingRun.run_dur, 0) },
-                    { label: "Experiment", shownByDefault: false, value: (imagingRun) => imagingRun.exp_title },
-                    { label: "Owner", shownByDefault: false, value: (imagingRun) => imagingRun.exp_owner },
-                    { label: "Experiment type", shownByDefault: true, value: (imagingRun) => imagingRun.exp_type },
-                    { label: "Spotted", shownByDefault: true, value: (imagingRun) => imagingRun.spotted },
+                    { key: "Run start", label: "Run start", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.run_start.replace("T", " ") },
+                    { key: "Microscope", label: "Microscope", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.microscope },
+                    { key: "Run name", label: "Run name", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).runNameWithoutChip },
+                    { key: "LG number", label: "LG #", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => imagingRun.exp_lgid },
+                    { key: "Chip", label: "Chip #", shownByDefault: true, freezable: true, frozenByDefault: true, value: (imagingRun) => runNameAndChip(imagingRun.run_name).chip ?? "–", link: wellWatcherFovMetricsUrl },
+                    { key: "Duration (s)", label: "Duration (s)", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.run_dur, 0) },
+                    { key: "Experiment", label: "Experiment", shownByDefault: false, value: (imagingRun) => imagingRun.exp_title },
+                    { key: "Owner", label: "Owner", shownByDefault: false, value: (imagingRun) => imagingRun.exp_owner },
+                    { key: "Experiment type", label: "Experiment type", shownByDefault: false, value: (imagingRun) => imagingRun.exp_type },
+                    { key: "Spotted", label: "Spotted", shownByDefault: false, value: (imagingRun) => imagingRun.spotted },
                 ],
             },
             {
                 label: "IDs",
                 columns: [
-                    { label: "Raw image ID", shownByDefault: false, value: (imagingRun) => imagingRun.rawimg_id },
-                    { label: "Alignment ID", shownByDefault: false, value: (imagingRun) => imagingRun.align_id },
-                    { label: "Photometry ID", shownByDefault: false, value: (imagingRun) => imagingRun.phot_id },
+                    { key: "Raw image ID", label: "Raw image ID", shownByDefault: false, value: (imagingRun) => imagingRun.rawimg_id },
+                    { key: "Alignment ID", label: "Alignment ID", shownByDefault: false, value: (imagingRun) => imagingRun.align_id },
+                    { key: "Photometry ID", label: "Photometry ID", shownByDefault: false, value: (imagingRun) => imagingRun.phot_id },
                 ],
             },
             {
                 label: "Alignment and Focus",
                 columns: [
-                    { label: "Misaligned FOVs", shownByDefault: true, value: misalignedFovCount },
-                    { label: "Focus 405", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_405, 3) },
-                    { label: "Focus 458", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_458, 3) },
+                    { key: "Misaligned FOVs", label: "n_Misaligned", shownByDefault: true, value: misalignedFovCount },
+                    { key: "Focus 405", label: "Focus 405", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_405, 3) },
+                    { key: "Focus 458", label: "Focus 458", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.median_focus_score_458, 3) },
                 ],
             },
             {
                 label: "Intensities",
                 columns: CHANNELS.map((channel) => ({
-                    label: `${channel} intensity`,
-                    shownByDefault: channel === "AF458",
+                    key: `${channel} intensity`,
+                    label: `Intensity ${channelWavelength(channel)}`,
+                    shownByDefault: true,
                     value: (imagingRun) => formatScore(imagingRun.filled_p875_intensities[channel], 1),
                 })),
             },
             {
                 label: "Vignette Scores",
                 columns: CHANNELS.map((channel) => ({
-                    label: `${channel} vignette score`,
-                    shownByDefault: false,
+                    key: `${channel} vignette score`,
+                    label: `Vignette ${channelWavelength(channel)}`,
+                    shownByDefault: true,
                     value: (imagingRun) => formatScore(imagingRun.vignette_scores[channel], 3),
                 })),
             },
@@ -219,12 +222,11 @@
                 // A single column needs no box to select the whole group.
                 label: null,
                 columns: [
-                    { label: "% well separated", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.percent_well_separated_cntr, 1) },
+                    { key: "% well separated", label: "% separated", shownByDefault: true, value: (imagingRun) => formatScore(imagingRun.percent_well_separated_cntr, 1) },
                 ],
             },
         ];
         const IMAGING_RUN_COLUMNS = IMAGING_RUN_COLUMN_GROUPS.flatMap((columnGroup) => columnGroup.columns);
-        const SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY = "shownImagingRunColumns";
         const FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY = "frozenImagingRunColumns";
         // Run names end in "Chip<number>", usually after a slash, as in "SN8689-AA/Chip1".
         const RUN_NAME_WITH_CHIP = /^(.*?)[\s\/_-]*chip\s*(\d+)$/i;
@@ -262,14 +264,14 @@
         const alignmentPixelErrorsByAlignId = new Map();
         let selectedImagingRun = null;
         let shownImagingRuns = [];
-        const freezableImagingRunColumnLabels = new Set(
-            IMAGING_RUN_COLUMNS.filter((column) => column.freezable).map((column) => column.label)
+        const freezableImagingRunColumnKeys = new Set(
+            IMAGING_RUN_COLUMNS.filter((column) => column.freezable).map((column) => column.key)
         );
         // Earlier versions of the page let any column be frozen, and saved those too.
-        const frozenImagingRunColumnLabels = new Set(
-            [...(savedImagingRunColumnLabels(FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY)
-                ?? IMAGING_RUN_COLUMNS.filter((column) => column.frozenByDefault).map((column) => column.label))]
-                .filter((columnLabel) => freezableImagingRunColumnLabels.has(columnLabel))
+        const frozenImagingRunColumnKeys = new Set(
+            [...(savedImagingRunColumnKeys(FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY)
+                ?? IMAGING_RUN_COLUMNS.filter((column) => column.frozenByDefault).map((column) => column.key))]
+                .filter((columnKey) => freezableImagingRunColumnKeys.has(columnKey))
         );
 
         function showQueryAlert(variant, title, message) {
@@ -297,6 +299,10 @@
             return imagingRun.fov_max_px_errors
                 .filter((pxError) => pxError !== null && pxError > misalignedPxThreshold)
                 .length;
+        }
+
+        function channelWavelength(channel) {
+            return channel.replace(/^AF/, "");
         }
 
         function runNameAndChip(runName) {
@@ -403,59 +409,60 @@
             }
         }
 
-        function savedImagingRunColumnLabels(storageKey) {
+        function savedImagingRunColumnKeys(storageKey) {
             try {
-                const columnLabels = JSON.parse(localStorage.getItem(storageKey));
-                return Array.isArray(columnLabels) ? new Set(columnLabels) : null;
+                const columnKeys = JSON.parse(localStorage.getItem(storageKey));
+                return Array.isArray(columnKeys) ? new Set(columnKeys) : null;
             } catch {
                 return null;
             }
         }
 
-        function shownImagingRunColumnLabels() {
+        function shownImagingRunColumnKeys() {
             return new Set(
-                [...imagingRunColumnCheckboxes.querySelectorAll("input[data-column-label]:checked")]
-                    .map((columnCheckbox) => columnCheckbox.dataset.columnLabel)
+                [...imagingRunColumnCheckboxes.querySelectorAll("input[data-column-key]:checked")]
+                    .map((columnCheckbox) => columnCheckbox.dataset.columnKey)
             );
         }
 
         function showSelectedImagingRunColumns() {
-            const shownLabels = shownImagingRunColumnLabels();
+            const shownKeys = shownImagingRunColumnKeys();
             for (const row of [imagingRunsHeader, ...imagingRunsBody.rows]) {
                 IMAGING_RUN_COLUMNS.forEach((column, columnIndex) => {
-                    row.cells[columnIndex].classList.toggle("d-none", !shownLabels.has(column.label));
+                    row.cells[columnIndex].classList.toggle("d-none", !shownKeys.has(column.key));
                 });
             }
             positionFrozenColumns();
         }
 
-        function toggleFrozenImagingRunColumn(columnLabel) {
-            if (!frozenImagingRunColumnLabels.delete(columnLabel)) {
-                frozenImagingRunColumnLabels.add(columnLabel);
+        function toggleFrozenImagingRunColumn(columnKey) {
+            if (!frozenImagingRunColumnKeys.delete(columnKey)) {
+                frozenImagingRunColumnKeys.add(columnKey);
             }
             localStorage.setItem(
-                FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...frozenImagingRunColumnLabels])
+                FROZEN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...frozenImagingRunColumnKeys])
             );
             showFreezeButtonStates();
             positionFrozenColumns();
         }
 
         function showFreezeButtonStates() {
-            for (const freezeButton of imagingRunColumnCheckboxes.querySelectorAll("button[data-column-label]")) {
-                const frozen = frozenImagingRunColumnLabels.has(freezeButton.dataset.columnLabel);
+            for (const freezeButton of imagingRunColumnCheckboxes.querySelectorAll("button[data-column-key]")) {
+                const frozen = frozenImagingRunColumnKeys.has(freezeButton.dataset.columnKey);
                 freezeButton.setAttribute("aria-pressed", String(frozen));
                 freezeButton.title = `${frozen ? "Unfreeze" : "Freeze"} ${freezeButton.dataset.columnLabel}`;
                 freezeButton.setAttribute("aria-label", freezeButton.title);
             }
         }
 
-        function freezeButton(columnLabel) {
+        function freezeButton(column) {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "freeze-column-button btn btn-link p-0 ms-1 align-baseline text-decoration-none";
-            button.dataset.columnLabel = columnLabel;
+            button.dataset.columnKey = column.key;
+            button.dataset.columnLabel = column.label;
             button.textContent = "📌";
-            button.addEventListener("click", () => toggleFrozenImagingRunColumn(columnLabel));
+            button.addEventListener("click", () => toggleFrozenImagingRunColumn(column.key));
             return button;
         }
 
@@ -467,7 +474,7 @@
             const shownColumnIndexes = IMAGING_RUN_COLUMNS
                 .map((column, columnIndex) => columnIndex)
                 .filter((columnIndex) => !imagingRunsHeader.cells[columnIndex].classList.contains("d-none"));
-            const isFrozen = (columnIndex) => frozenImagingRunColumnLabels.has(IMAGING_RUN_COLUMNS[columnIndex].label);
+            const isFrozen = (columnIndex) => frozenImagingRunColumnKeys.has(IMAGING_RUN_COLUMNS[columnIndex].key);
             let frozenColumnLeftPx = 0;
             shownColumnIndexes.forEach((columnIndex, shownColumnPosition) => {
                 const frozen = isFrozen(columnIndex);
@@ -484,13 +491,6 @@
                     frozenColumnLeftPx += imagingRunsHeader.cells[columnIndex].getBoundingClientRect().width;
                 }
             });
-        }
-
-        function saveAndShowSelectedImagingRunColumns() {
-            localStorage.setItem(
-                SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY, JSON.stringify([...shownImagingRunColumnLabels()])
-            );
-            showSelectedImagingRunColumns();
         }
 
         function labeledCheckbox(checkboxId, labelText, labelClassName) {
@@ -515,7 +515,6 @@
         }
 
         function createImagingRunColumnCheckboxes() {
-            const savedShownLabels = savedImagingRunColumnLabels(SHOWN_IMAGING_RUN_COLUMNS_STORAGE_KEY);
             let columnIndex = 0;
             imagingRunColumnCheckboxes.replaceChildren(...IMAGING_RUN_COLUMN_GROUPS.map((columnGroup, columnGroupIndex) => {
                 const columnGroupList = document.createElement("div");
@@ -523,13 +522,13 @@
                     const { checkbox, checkboxWrapper } = labeledCheckbox(
                         `imaging-run-column-${columnIndex++}`, column.label, ""
                     );
-                    checkbox.dataset.columnLabel = column.label;
-                    checkbox.checked = savedShownLabels ? savedShownLabels.has(column.label) : column.shownByDefault;
+                    checkbox.dataset.columnKey = column.key;
+                    checkbox.checked = column.shownByDefault;
                     if (columnGroup.label !== null) {
                         checkboxWrapper.classList.add("ms-3");
                     }
                     if (column.freezable) {
-                        checkboxWrapper.append(freezeButton(column.label));
+                        checkboxWrapper.append(freezeButton(column));
                     }
                     return { checkbox, checkboxWrapper };
                 });
@@ -541,7 +540,7 @@
                     showColumnGroupCheckboxState(columnGroupCheckbox, checkboxes);
                     columnGroupCheckbox.addEventListener("change", () => {
                         checkboxes.forEach((checkbox) => { checkbox.checked = columnGroupCheckbox.checked; });
-                        saveAndShowSelectedImagingRunColumns();
+                        showSelectedImagingRunColumns();
                     });
                     checkboxes.forEach((checkbox) => checkbox.addEventListener("change", () => {
                         showColumnGroupCheckboxState(columnGroupCheckbox, checkboxes);
@@ -549,7 +548,7 @@
                     columnGroupList.append(checkboxWrapper);
                 }
                 for (const { checkbox, checkboxWrapper } of columnCheckboxes) {
-                    checkbox.addEventListener("change", saveAndShowSelectedImagingRunColumns);
+                    checkbox.addEventListener("change", showSelectedImagingRunColumns);
                     columnGroupList.append(checkboxWrapper);
                 }
                 return columnGroupList;
@@ -710,7 +709,7 @@
             const chipColumnCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.column)) + 1;
             const chipRowCount = Math.max(...chipPositions.map((chipPosition) => chipPosition.row)) + 1;
             const title = `${channel} ${axis.label}`;
-            // Drawn one unit per FOV and scaled by the block size control's CSS variable, so resizing doesn't redraw.
+            // Drawn one unit per FOV and scaled by the plot size control's CSS variable, so resizing doesn't redraw.
             const heatmap = svgElement("svg", {
                 viewBox: `0 0 ${chipColumnCount} ${chipRowCount}`,
                 style: `width: calc(var(--heatmap-fov-size) * ${chipColumnCount}); height: calc(var(--heatmap-fov-size) * ${chipRowCount});`,
@@ -792,12 +791,18 @@
             }
         }
 
+        function selectedImagingRunTitleText(imagingRun) {
+            const runStartDate = imagingRun.run_start.split("T")[0];
+            const { runNameWithoutChip, chip } = runNameAndChip(imagingRun.run_name);
+            return `${runStartDate}/${runNameWithoutChip}/LG${imagingRun.exp_lgid}/Chip ${chip ?? "–"}`;
+        }
+
         function selectImagingRun(imagingRun, row) {
             for (const otherRow of imagingRunsBody.rows) {
                 otherRow.classList.toggle("table-active", otherRow === row);
             }
             selectedImagingRun = imagingRun;
-            selectedImagingRunTitle.textContent = imagingRun.run_name;
+            selectedImagingRunTitle.textContent = selectedImagingRunTitleText(imagingRun);
             showSelectedImagingRunMetrics(imagingRun);
             selectedImagingRunPanel.classList.remove("d-none");
             showHybiscusPlot(imagingRun);
